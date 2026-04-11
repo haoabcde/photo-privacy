@@ -114,6 +114,11 @@ def batch_process():
     blur_strength = int(request.form.get("blur_strength", 55))
     global_blur_strength = int(request.form.get("global_blur_strength", 0))
 
+    # 新增批处理智能规则参数
+    is_smart_batch = request.form.get("is_smart_batch") == "true"
+    rule_single = request.form.get("rule_single", "blur")
+    rule_multi = request.form.get("rule_multi", "blur_faces")
+
     avatar_path = None
     if "avatar" in request.files and request.files["avatar"].filename:
         av_file = request.files["avatar"]
@@ -139,7 +144,10 @@ def batch_process():
                         detect_mode=detect_mode,
                         blur_strength=blur_strength,
                         avatar_path=avatar_path,
-                        global_blur_strength=global_blur_strength
+                        global_blur_strength=global_blur_strength,
+                        is_smart_batch=is_smart_batch,
+                        rule_single=rule_single,
+                        rule_multi=rule_multi
                     )
                     total_faces += face_count
                     processed_count += 1
