@@ -248,8 +248,8 @@
     <div class="upload-area" id="dropZone">
       <input type="file" id="imageInput" accept="image/*" multiple onchange="onFileSelect(this)" />
       <div class="upload-icon">📷</div>
-      <p><strong>点击选择</strong>或拖拽图片到此处</p>
-      <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持 JPG / PNG / WEBP，最大 20MB</p>
+      <p><strong>点击选择</strong>或拖拽多张图片到此处</p>
+      <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持批量处理 JPG / PNG / WEBP，单次最大 20MB</p>
     </div>
     <div id="previewWrap">
       <img id="previewImg" src="" alt="预览" />
@@ -258,11 +258,21 @@
 
     <!-- 选项 -->
     <div class="options" id="blurOptions" style="display:none;">
-      <label>模糊强度</label>
+      <label>局部人脸模糊强度</label>
       <div class="slider-row">
         <input type="range" id="blurStrength" min="15" max="99" step="2" value="55"
                oninput="document.getElementById('blurVal').textContent=this.value" />
         <span class="slider-val" id="blurVal">55</span>
+      </div>
+    </div>
+
+    <!-- 全局画质融合选项（对所有模式和批量生效） -->
+    <div class="options">
+      <label>整体融合/老照片包浆感（使处理痕迹更自然）</label>
+      <div class="slider-row">
+        <input type="range" id="globalBlurStrength" min="0" max="100" step="1" value="0"
+               oninput="document.getElementById('globalBlurVal').textContent=this.value" />
+        <span class="slider-val" id="globalBlurVal">0</span>
       </div>
     </div>
 
@@ -465,6 +475,7 @@ async function processImage() {
   formData.append('mode', currentMode);
   formData.append('detect_mode', currentDetectMode);
   formData.append('blur_strength', document.getElementById('blurStrength').value);
+  formData.append('global_blur_strength', document.getElementById('globalBlurStrength').value);
 
   const avatarFile = document.getElementById('avatarInput').files[0];
   if (avatarFile) formData.append('avatar', avatarFile);
