@@ -290,36 +290,51 @@ def apply_face_blur(image_bgr, faces, blur_strength=55):
 
 
 # ─── 主处理入口 ───────────────────────────────────────────────
-def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None, global_blur_strength=0):
+def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None, global_blur_strength=0, 
+                  is_smart_batch=False, rule_single="blur", rule_multi="blur_faces"):
     nparr = np.frombuffer(image_bytes, np.uint8)
     image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image_bgr is None:
         raise ValueError("无法读取图片")
 
-    detect_mode = _resolve_detect_mode(mode, detect_mode)
-    faces = detect_faces(image_bgr, mode=mode, detect_mode=detect_mode)
+    # 全量检测人脸，不刻意过滤（使用 multi 策略获取所有人脸）
+    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi")
     face_count = len(faces)
 
-    if face_count == 0:
-        # 如果未检测到人脸，依然可以应用全局模糊和降质
-        output = image_bgr.copy()
+    if is_smart_batch:
+        # 智能批处理路由逻辑
+        if face_count == 0:
+            # 无脸照片：直接原图返回，不重编码
+            return image_bytes, 0
+        elif face_count == 1:
+            if rule_single == "keep":
+                return image_bytes, 1
+            # 若不是 keep，再用 single 策略精准定位那一张脸
+            faces = detect_faces(image_bgr, mode="blur", detect_mode="single")
+            output = apply_cartoon_avatar(image_bgr, faces, avatar_path) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+        else: # face_count >= 2
+            if rule_multi == "global_blur_only":
+                output = image_bgr.copy() # 不模糊人脸，仅走下方全局模糊
+            else: # rule_multi == "blur_faces"
+                output = apply_face_blur(image_bgr, faces, blur_strength)
     else:
-        output = apply_cartoon_avatar(image_bgr, faces, avatar_path) \
-                 if mode == "avatar" else \
-                 apply_face_blur(image_bgr, faces, blur_strength)
+        # 单张精修逻辑（旧有逻辑）
+        detect_mode = _resolve_detect_mode(mode, detect_mode)
+        faces = detect_faces(image_bgr, mode=mode, detect_mode=detect_mode)
+        face_count = len(faces)
+        if face_count == 0:
+            output = image_bgr.copy()
+        else:
+            output = apply_cartoon_avatar(image_bgr, faces, avatar_path) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
 
-    # === 新增：全局融合与老照片感处理 ===
+    # === 全局融合与老照片感处理 ===
     jpeg_quality = 95
     if global_blur_strength > 0:
-        # 1. 极轻微的全局高斯模糊，消除拼接锐利感
         sigma = global_blur_strength / 20.0
-        # 保证核大小为奇数，最大不超过 7，避免过度失焦
         k_size = int(sigma * 2) | 1
         k_size = min(k_size, 7)
         if k_size >= 3:
             output = cv2.GaussianBlur(output, (k_size, k_size), sigma)
-        
-        # 2. 动态降低 JPEG 质量 (95 -> 35) 产生自然包浆块
         jpeg_quality = max(35, 95 - int(global_blur_strength * 0.6))
 
     _, buf = cv2.imencode(".jpg", output, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
