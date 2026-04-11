@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>人脸隐私保护工具</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 24px 16px;
+      color: #333;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+      color: #fff;
+    }
+    header h1 { font-size: 2rem; font-weight: 700; letter-spacing: 1px; }
+    header p  { margin-top: 8px; opacity: .85; font-size: .95rem; }
+
+    .card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.15);
+      margin-bottom: 20px;
+    }
+
+    /* 模式选择 */
+    .mode-selector {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .section-label {
+      margin: 6px 0 10px;
+      font-size: .9rem;
+      font-weight: 700;
+      color: #555;
+    }
+    .detect-selector {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .mode-btn {
+      flex: 1;
+      border: 2px solid #e0e0e0;
+      border-radius: 14px;
+      padding: 18px 12px;
+      cursor: pointer;
+      text-align: center;
+      transition: all .2s;
+      background: #fafafa;
+      user-select: none;
+    }
+    .mode-btn:hover { border-color: #667eea; background: #f0f1ff; }
+    .mode-btn.active {
+      border-color: #667eea;
+      background: linear-gradient(135deg, #eef0ff, #f5f0ff);
+      box-shadow: 0 2px 12px rgba(102,126,234,.2);
+    }
+    .mode-btn .icon { font-size: 2.2rem; margin-bottom: 8px; }
+    .mode-btn .title { font-weight: 600; font-size: 1rem; color: #333; }
+    .mode-btn .desc  { font-size: .8rem; color: #888; margin-top: 4px; line-height: 1.4; }
+
+    /* 上传区域 */
+    .upload-area {
+      border: 2px dashed #ccc;
+      border-radius: 14px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .2s;
+      position: relative;
+      background: #fafafa;
+    }
+    .upload-area:hover, .upload-area.dragover {
+      border-color: #667eea;
+      background: #f0f1ff;
+    }
+    .upload-area input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-area .upload-icon { font-size: 3rem; color: #aaa; }
+    .upload-area p { color: #888; margin-top: 10px; font-size: .92rem; }
+    .upload-area strong { color: #667eea; }
+
+    /* 选项区 */
+    .options { margin: 20px 0; }
+    .options label { font-weight: 600; font-size: .92rem; color: #444; display: block; margin-bottom: 8px; }
+    .slider-row { display: flex; align-items: center; gap: 14px; }
+    input[type=range] { flex: 1; accent-color: #667eea; }
+    .slider-val {
+      min-width: 44px; text-align: center; font-weight: 700;
+      color: #667eea; font-size: 1rem;
+    }
+
+    /* 自定义头像上传 */
+    .avatar-upload { display: none; margin-top: 16px; }
+    .avatar-upload.show { display: block; }
+    .avatar-upload label { font-weight: 600; font-size: .92rem; color: #444; margin-bottom: 8px; display: block; }
+    .avatar-upload-box {
+      border: 2px dashed #ccc; border-radius: 10px;
+      padding: 14px; text-align: center; cursor: pointer;
+      background: #fafafa; transition: all .2s; position: relative;
+    }
+    .avatar-upload-box:hover { border-color: #667eea; background: #f0f1ff; }
+    .avatar-upload-box input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .avatar-upload-box p { font-size: .85rem; color: #999; }
+    #avatarPreview { display: none; width: 72px; height: 72px; border-radius: 50%; object-fit: cover; margin: 8px auto 0; border: 2px solid #667eea; }
+
+    /* 按钮 */
+    .btn-process {
+      width: 100%; padding: 15px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 1.05rem; font-weight: 700; cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      margin-top: 8px;
+    }
+    .btn-process:hover { opacity: .92; }
+    .btn-process:active { transform: scale(.98); }
+    .btn-process:disabled { opacity: .55; cursor: not-allowed; }
+
+    /* 进度 */
+    .progress-wrap { display: none; margin-top: 16px; }
+    .progress-bar {
+      height: 8px; background: #eee; border-radius: 99px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      border-radius: 99px;
+      transition: width .3s;
+      animation: progress-anim 1.2s infinite;
+    }
+    @keyframes progress-anim {
+      0%   { width: 20%; margin-left: 0; }
+      50%  { width: 50%; margin-left: 25%; }
+      100% { width: 20%; margin-left: 80%; }
+    }
+    .progress-tip { text-align: center; font-size: .88rem; color: #888; margin-top: 8px; }
+
+    /* 预览/结果区 */
+    .result-section { display: none; }
+    .compare-wrap {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    }
+    @media (max-width: 600px) { .compare-wrap { grid-template-columns: 1fr; } }
+    .compare-item { text-align: center; }
+    .compare-item .label {
+      font-size: .85rem; font-weight: 600; color: #666;
+      margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .compare-item img {
+      width: 100%; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.1);
+    }
+
+    .info-bar {
+      background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+      border-radius: 10px; padding: 12px 16px;
+      font-size: .9rem; color: #388e3c;
+      margin-bottom: 16px; font-weight: 500;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .info-bar.warn { background: linear-gradient(135deg, #fff3e0, #fce4ec); color: #e65100; }
+
+    .btn-download {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 28px;
+      background: linear-gradient(135deg, #43a047, #1de9b6);
+      color: #fff; border: none; border-radius: 10px;
+      font-size: .95rem; font-weight: 700; cursor: pointer;
+      text-decoration: none; transition: opacity .2s;
+      margin-top: 16px;
+    }
+    .btn-download:hover { opacity: .88; }
+
+    .btn-reset {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 24px;
+      background: #f5f5f5; color: #555;
+      border: 1px solid #ddd; border-radius: 10px;
+      font-size: .95rem; cursor: pointer;
+      text-decoration: none; transition: background .2s;
+      margin-top: 16px; margin-left: 12px;
+    }
+    .btn-reset:hover { background: #ebebeb; }
+
+    /* 预览图（上传后） */
+    #previewWrap { display: none; margin-top: 16px; text-align: center; }
+    #previewImg { max-height: 220px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+
+    footer { text-align: center; color: rgba(255,255,255,.6); margin-top: 24px; font-size: .82rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🛡️ 人脸隐私保护工具</h1>
+    <p>本地运行 · 数据不上传 · 基于 MediaPipe 人脸检测</p>
+  </header>
+
+  <div class="card">
+    <!-- 处理效果 -->
+    <div class="section-label">处理效果</div>
+    <div class="mode-selector">
+      <div class="mode-btn active" data-mode="avatar" onclick="selectMode('avatar', this)">
+        <div class="icon">🎭</div>
+        <div class="title">卡通头像替换</div>
+        <div class="desc">对检测到的人脸做头像覆盖</div>
+      </div>
+      <div class="mode-btn" data-mode="blur" onclick="selectMode('blur', this)">
+        <div class="icon">🌫️</div>
+        <div class="title">人脸模糊处理</div>
+        <div class="desc">仅对检测到的人脸做模糊，其他区域保持高清</div>
+      </div>
+    </div>
+
+    <!-- 人数场景 -->
+    <div class="section-label">人数场景（手动指定检测策略）</div>
+    <div class="detect-selector">
+      <div class="mode-btn active" data-detect-mode="single" onclick="selectDetectMode('single', this)">
+        <div class="icon">👤</div>
+        <div class="title">单人</div>
+        <div class="desc">只保留最可信主脸，避免误检到背景或身体局部</div>
+      </div>
+      <div class="mode-btn" data-detect-mode="multi" onclick="selectDetectMode('multi', this)">
+        <div class="icon">👥</div>
+        <div class="title">多人</div>
+        <div class="desc">尽量保留多张人脸，适合合影与多人同框</div>
+      </div>
+    </div>
+
+    <!-- 上传区域 -->
+    <div class="upload-area" id="dropZone">
+      <input type="file" id="imageInput" accept="image/*" multiple onchange="onFileSelect(this)" />
+      <div class="upload-icon">📷</div>
+      <p><strong>点击选择</strong>或拖拽图片到此处</p>
+      <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持 JPG / PNG / WEBP，最大 20MB</p>
+    </div>
+    <div id="previewWrap">
+      <img id="previewImg" src="" alt="预览" />
+      <p style="font-size:.82rem;color:#aaa;margin-top:6px;">原图预览</p>
+    </div>
+
+    <!-- 选项 -->
+    <div class="options" id="blurOptions" style="display:none;">
+      <label>模糊强度</label>
+      <div class="slider-row">
+        <input type="range" id="blurStrength" min="15" max="99" step="2" value="55"
+               oninput="document.getElementById('blurVal').textContent=this.value" />
+        <span class="slider-val" id="blurVal">55</span>
+      </div>
+    </div>
+
+    <div class="avatar-upload" id="avatarSection">
+      <label>自定义头像（可选，留空则使用自动生成的卡通头像）</label>
+      <div class="avatar-upload-box">
+        <input type="file" id="avatarInput" accept="image/*" onchange="onAvatarSelect(this)" />
+        <p>点击上传自定义头像图片</p>
+        <img id="avatarPreview" src="" alt="头像预览" />
+      </div>
+    </div>
+
+    <!-- 处理按钮 -->
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn-process" id="processBtn" onclick="processImage()" disabled style="flex:1;">
+        ✨ 开始处理
+      </button>
+      <button class="btn-process" id="debugBtn" onclick="debugBoxes()" disabled
+              style="flex:0 0 auto;width:auto;padding:15px 18px;background:linear-gradient(135deg,#546e7a,#263238);font-size:.88rem;">
+        🔍 检测框预览
+      </button>
+    </div>
+
+    <!-- 进度条 -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar"><div class="progress-fill"></div></div>
+      <p class="progress-tip" id="progressTip">🔍 正在检测人脸并处理，请稍候...</p>
+    </div>
+  </div>
+
+  <!-- 结果区 -->
+  <div class="card result-section" id="resultSection">
+    <div class="info-bar" id="infoBar"></div>
+    <div class="compare-wrap">
+      <div class="compare-item">
+        <div class="label" id="leftLabel">原图</div>
+        <img id="originalImg" src="" alt="原图" />
+      </div>
+      <div class="compare-item">
+        <div class="label" id="rightLabel">处理后</div>
+        <img id="resultImg" src="" alt="处理结果" />
+      </div>
+    </div>
+    <!-- 调试图说明 -->
+    <div id="debugLegend" style="display:none;margin:12px 0;padding:10px 14px;background:#f5f5f5;border-radius:8px;font-size:.83rem;color:#555;">
+      <span style="color:#008800;font-weight:600;">■ 绿框</span> YuNet深度学习检测 &nbsp;
+      <span style="color:#e65100;font-weight:600;">■ 橙框</span> Haar传统检测 &nbsp;
+      <span style="color:#cc0000;font-weight:600;">■ 红框（编号）</span> 最终输出结果
+    </div>
+    <div style="text-align:center;">
+      <a class="btn-download" id="downloadBtn" href="#" download>⬇️ 下载处理后图片</a>
+      <button class="btn-reset" onclick="reset()">🔄 重新处理</button>
+    </div>
+  </div>
+
+  <footer>所有图片均在本地处理，不会上传到任何服务器</footer>
+</div>
+
+<script>
+let currentMode = 'avatar';
+let currentDetectMode = 'single';
+let selectedFiles = [];
+let originalDataUrl = null;
+
+function selectMode(mode, el) {
+  currentMode = mode;
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('blurOptions').style.display = mode === 'blur' ? 'block' : 'none';
+  document.getElementById('avatarSection').className = 'avatar-upload' + (mode === 'avatar' ? ' show' : '');
+}
+
+function selectDetectMode(mode, el) {
+  currentDetectMode = mode;
+  document.querySelectorAll('[data-detect-mode]').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function onFileSelect(input) {
+  const files = Array.from(input.files);
+  if (files.length === 0) return;
+  selectedFiles = files;
+  
+  if (files.length === 1) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      originalDataUrl = e.target.result;
+      document.getElementById('previewImg').src = e.target.result;
+      document.getElementById('previewImg').style.display = 'inline-block';
+      document.getElementById('previewWrap').querySelector('p').textContent = '原图预览';
+      document.getElementById('previewWrap').style.display = 'block';
+    };
+    reader.readAsDataURL(files[0]);
+  } else {
+    document.getElementById('previewImg').style.display = 'none';
+    document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 张图片</strong><br>批量处理模式下不支持预览原图`;
+    document.getElementById('previewWrap').style.display = 'block';
+  }
+  
+  document.getElementById('processBtn').disabled = false;
+  document.getElementById('debugBtn').disabled = files.length > 1; // 调试框暂不支持批量
+}
+
+function onAvatarSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const preview = document.getElementById('avatarPreview');
+    preview.src = e.target.result;
+    preview.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+// 拖拽支持修改
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  if (files.length > 0) {
+    selectedFiles = files;
+    
+    if (files.length === 1) {
+      const reader = new FileReader();
+      reader.onload = ev => {
+        originalDataUrl = ev.target.result;
+        document.getElementById('previewImg').src = ev.target.result;
+        document.getElementById('previewImg').style.display = 'inline-block';
+        document.getElementById('previewWrap').querySelector('p').textContent = '原图预览';
+        document.getElementById('previewWrap').style.display = 'block';
+      };
+      reader.readAsDataURL(files[0]);
+    } else {
+      document.getElementById('previewImg').style.display = 'none';
+      document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 张图片</strong><br>批量处理模式下不支持预览原图`;
+      document.getElementById('previewWrap').style.display = 'block';
+    }
+    
+    document.getElementById('processBtn').disabled = false;
+    document.getElementById('debugBtn').disabled = files.length > 1;
+  }
+});
+
+async function debugBoxes() {
+  if (selectedFiles.length === 0) return;
+  const btn = document.getElementById('debugBtn');
+  btn.disabled = true;
+  document.getElementById('progressTip').textContent = '🔍 正在分析人脸检测框，请稍候...';
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('resultSection').style.display = 'none';
+
+  const formData = new FormData();
+  formData.append('image', selectedFiles[0]);
+  formData.append('mode', currentMode);
+  formData.append('detect_mode', currentDetectMode);
+  try {
+    const resp = await fetch('/debug_boxes', { method: 'POST', body: formData });
+    const data = await resp.json();
+    document.getElementById('progressWrap').style.display = 'none';
+    if (!data.success) { alert('调试失败：' + data.error); btn.disabled = false; return; }
+
+    const infoBar = document.getElementById('infoBar');
+    infoBar.className = 'info-bar';
+    infoBar.innerHTML = `🔍 调试模式 — YuNet: <strong>${data.yunet_count}</strong> 张 · Haar: <strong>${data.haar_count}</strong> 张 · 最终: <strong>${data.final_count}</strong> 张`;
+
+    document.getElementById('leftLabel').textContent = '原图';
+    document.getElementById('rightLabel').textContent = '检测框（调试）';
+    document.getElementById('originalImg').src = originalDataUrl;
+    document.getElementById('resultImg').src = data.debug_url + '?t=' + Date.now();
+    document.getElementById('debugLegend').style.display = 'block';
+
+    const filename = data.debug_url.split('/').pop();
+    document.getElementById('downloadBtn').href = '/download/' + filename;
+    document.getElementById('resultSection').style.display = 'block';
+    document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    document.getElementById('progressWrap').style.display = 'none';
+    alert('网络错误：' + e.message);
+  }
+  btn.disabled = false;
+}
+
+async function processImage() {
+  if (selectedFiles.length === 0) return;
+  document.getElementById('debugLegend').style.display = 'none';
+  document.getElementById('leftLabel').textContent = '原图';
+  document.getElementById('rightLabel').textContent = '处理后';
+
+  const btn = document.getElementById('processBtn');
+  btn.disabled = true;
+  document.getElementById('progressTip').textContent = '🔍 正在检测人脸并处理，请稍候...';
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('resultSection').style.display = 'none';
+
+  const formData = new FormData();
+  formData.append('mode', currentMode);
+  formData.append('detect_mode', currentDetectMode);
+  formData.append('blur_strength', document.getElementById('blurStrength').value);
+
+  const avatarFile = document.getElementById('avatarInput').files[0];
+  if (avatarFile) formData.append('avatar', avatarFile);
+
+  const isBatch = selectedFiles.length > 1;
+  if (isBatch) {
+    selectedFiles.forEach(file => formData.append('images', file));
+  } else {
+    formData.append('image', selectedFiles[0]);
+  }
+
+  const endpoint = isBatch ? '/batch_process' : '/process';
+
+  try {
+    const resp = await fetch(endpoint, { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    document.getElementById('progressWrap').style.display = 'none';
+
+    if (!data.success) {
+      alert('处理失败：' + data.error);
+      btn.disabled = false;
+      return;
+    }
+
+    const infoBar = document.getElementById('infoBar');
+    const modeText = data.mode === 'avatar' ? '卡通头像替换' : '人脸模糊';
+    const detectText = data.detect_mode === 'multi' ? '多人策略' : '单人策略';
+
+    if (isBatch) {
+      infoBar.className = 'info-bar';
+      infoBar.innerHTML = `✅ 批量处理完成！共处理 <strong>${data.processed_count}</strong> 张图片，检测到 <strong>${data.total_faces}</strong> 张人脸（${modeText} / ${detectText}）`;
+      
+      document.getElementById('originalImg').src = '';
+      document.getElementById('resultImg').src = 'https://img.icons8.com/color/150/000000/archive.png'; // ZIP 占位图
+      document.getElementById('leftLabel').textContent = '批量处理结果';
+      document.getElementById('rightLabel').textContent = '已打包为 ZIP';
+      document.getElementById('downloadBtn').textContent = '⬇️ 下载 ZIP 压缩包';
+    } else {
+      if (data.face_count === 0) {
+        infoBar.className = 'info-bar warn';
+        infoBar.innerHTML = '⚠️ 未检测到人脸，已返回原图。请确认图片中有清晰正面人脸。';
+      } else {
+        infoBar.className = 'info-bar';
+        infoBar.innerHTML = `✅ 检测到 <strong>${data.face_count}</strong> 张人脸，已完成 <strong>${modeText}</strong> 处理（${detectText}）`;
+      }
+      document.getElementById('originalImg').src = originalDataUrl;
+      document.getElementById('resultImg').src = data.result_url + '?t=' + Date.now();
+      document.getElementById('leftLabel').textContent = '原图';
+      document.getElementById('rightLabel').textContent = '处理后';
+      document.getElementById('downloadBtn').textContent = '⬇️ 下载处理后图片';
+    }
+
+    const filename = data.result_url.split('/').pop();
+    document.getElementById('downloadBtn').href = '/download/' + filename;
+
+    document.getElementById('resultSection').style.display = 'block';
+    document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    document.getElementById('progressWrap').style.display = 'none';
+    alert('网络错误：' + e.message);
+  }
+
+  btn.disabled = false;
+}
+
+function reset() {
+  selectedFiles = [];
+  originalDataUrl = null;
+  document.getElementById('imageInput').value = '';
+  document.getElementById('avatarInput').value = '';
+  document.getElementById('previewWrap').style.display = 'none';
+  document.getElementById('avatarPreview').style.display = 'none';
+  document.getElementById('resultSection').style.display = 'none';
+  document.getElementById('processBtn').disabled = true;
+  document.getElementById('debugBtn').disabled = true;
+  document.getElementById('debugLegend').style.display = 'none';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 初始化默认模式显示
+selectMode('avatar', document.querySelector('[data-mode="avatar"]'));
+selectDetectMode('single', document.querySelector('[data-detect-mode="single"]'));
+</script>
+</body>
+</html>
