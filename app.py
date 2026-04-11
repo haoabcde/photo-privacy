@@ -60,6 +60,7 @@ def process():
     mode = request.form.get("mode", "blur")          # 处理效果: "avatar" 或 "blur"
     detect_mode = request.form.get("detect_mode")     # 检测策略: "single" 或 "multi"
     blur_strength = int(request.form.get("blur_strength", 55))
+    global_blur_strength = int(request.form.get("global_blur_strength", 0))
 
     image_bytes = file.read()
 
@@ -78,7 +79,8 @@ def process():
             mode=mode,
             detect_mode=detect_mode,
             blur_strength=blur_strength,
-            avatar_path=avatar_path
+            avatar_path=avatar_path,
+            global_blur_strength=global_blur_strength
         )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -110,6 +112,7 @@ def batch_process():
     mode = request.form.get("mode", "blur")
     detect_mode = request.form.get("detect_mode")
     blur_strength = int(request.form.get("blur_strength", 55))
+    global_blur_strength = int(request.form.get("global_blur_strength", 0))
 
     avatar_path = None
     if "avatar" in request.files and request.files["avatar"].filename:
@@ -135,7 +138,8 @@ def batch_process():
                         mode=mode,
                         detect_mode=detect_mode,
                         blur_strength=blur_strength,
-                        avatar_path=avatar_path
+                        avatar_path=avatar_path,
+                        global_blur_strength=global_blur_strength
                     )
                     total_faces += face_count
                     processed_count += 1
