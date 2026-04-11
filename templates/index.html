@@ -214,8 +214,16 @@
   </header>
 
   <div class="card">
-    <!-- 处理效果 -->
-    <div class="section-label">处理效果</div>
+    <!-- Tab 切换 -->
+    <div class="tabs" style="display:flex; margin-bottom: 20px; border-bottom: 1px solid #eee;">
+      <button class="tab-btn active" id="tabSingle" onclick="switchTab('single')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid #007bff; font-weight:bold; cursor:pointer; color:#333;">单张精修</button>
+      <button class="tab-btn" id="tabBatch" onclick="switchTab('batch')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid transparent; color:#666; cursor:pointer;">智能批处理</button>
+    </div>
+
+    <!-- 单张精修专属设置 -->
+    <div id="singleSettings">
+      <!-- 处理效果 -->
+      <div class="section-label">处理效果</div>
     <div class="mode-selector">
       <div class="mode-btn active" data-mode="avatar" onclick="selectMode('avatar', this)">
         <div class="icon">🎭</div>
@@ -243,12 +251,40 @@
         <div class="desc">尽量保留多张人脸，适合合影与多人同框</div>
       </div>
     </div>
+    </div>
+
+    <!-- 智能批处理专属设置 -->
+    <div id="batchSettings" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+      <div class="section-label" style="margin-top:0;">批处理智能规则</div>
+      
+      <div style="margin-bottom: 12px;">
+        <label style="font-weight:bold; font-size:0.9rem;">🏞️ 0 张人脸（风景/静物）</label>
+        <p style="font-size:0.8rem; color:#666; margin:4px 0 0 0;">处理动作：保留原图并直接放入压缩包</p>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label style="font-weight:bold; font-size:0.9rem;">👤 1 张人脸（单人照）</label>
+        <select id="ruleSingle" style="width:100%; padding:8px; margin-top:4px; border:1px solid #ccc; border-radius:4px;">
+          <option value="avatar">使用卡通头像替换</option>
+          <option value="blur">进行局部人脸模糊</option>
+          <option value="keep">保留原图不做处理</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label style="font-weight:bold; font-size:0.9rem;">👥 2 张及以上人脸（多人合照）</label>
+        <select id="ruleMulti" style="width:100%; padding:8px; margin-top:4px; border:1px solid #ccc; border-radius:4px;">
+          <option value="blur_faces">所有人脸局部打码</option>
+          <option value="global_blur_only">不打码，仅作整体照片模糊降质（需配置下方整体融合）</option>
+        </select>
+      </div>
+    </div>
 
     <!-- 上传区域 -->
     <div class="upload-area" id="dropZone">
-      <input type="file" id="imageInput" accept="image/*" multiple onchange="onFileSelect(this)" />
+      <input type="file" id="imageInput" accept="image/*" onchange="onFileSelect(this)" />
       <div class="upload-icon">📷</div>
-      <p><strong>点击选择</strong>或拖拽多张图片到此处</p>
+      <p><strong>点击选择</strong>或拖拽 1 张图片到此处</p>
       <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持批量处理 JPG / PNG / WEBP，单次最大 20MB</p>
     </div>
     <div id="previewWrap">
@@ -336,13 +372,61 @@ let currentMode = 'avatar';
 let currentDetectMode = 'single';
 let selectedFiles = [];
 let originalDataUrl = null;
+let currentTab = 'single'; // 默认单张模式
+
+function switchTab(tab) {
+  currentTab = tab;
+  if (tab === 'single') {
+    document.getElementById('tabSingle').style.borderBottomColor = '#007bff';
+    document.getElementById('tabSingle').style.fontWeight = 'bold';
+    document.getElementById('tabSingle').style.color = '#333';
+    document.getElementById('tabBatch').style.borderBottomColor = 'transparent';
+    document.getElementById('tabBatch').style.fontWeight = 'normal';
+    document.getElementById('tabBatch').style.color = '#666';
+    
+    document.getElementById('singleSettings').style.display = 'block';
+    document.getElementById('batchSettings').style.display = 'none';
+    
+    // 恢复原来的 accept 和 multiple
+    document.getElementById('imageInput').removeAttribute('multiple');
+    document.getElementById('imageInput').accept = 'image/*';
+    document.getElementById('dropZone').querySelector('p').innerHTML = '<strong>点击选择</strong>或拖拽 1 张图片到此处';
+    
+    // 触发一下 selectMode 恢复状态
+    selectMode(currentMode, document.querySelector('.mode-selector .mode-btn.active'));
+  } else {
+    document.getElementById('tabBatch').style.borderBottomColor = '#007bff';
+    document.getElementById('tabBatch').style.fontWeight = 'bold';
+    document.getElementById('tabBatch').style.color = '#333';
+    document.getElementById('tabSingle').style.borderBottomColor = 'transparent';
+    document.getElementById('tabSingle').style.fontWeight = 'normal';
+    document.getElementById('tabSingle').style.color = '#666';
+    
+    document.getElementById('singleSettings').style.display = 'none';
+    document.getElementById('batchSettings').style.display = 'block';
+    
+    // 允许批量和 ZIP
+    document.getElementById('imageInput').setAttribute('multiple', 'multiple');
+    document.getElementById('imageInput').accept = 'image/*,.zip';
+    document.getElementById('dropZone').querySelector('p').innerHTML = '<strong>点击选择</strong>或拖拽多张图片 / ZIP 压缩包到此处';
+    
+    document.getElementById('avatarSection').className = 'avatar-upload show'; // 批处理可能用到头像
+    document.getElementById('blurOptions').style.display = 'block';   // 批处理可能用到模糊
+  }
+  reset();
+}
 
 function selectMode(mode, el) {
   currentMode = mode;
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('blurOptions').style.display = mode === 'blur' ? 'block' : 'none';
-  document.getElementById('avatarSection').className = 'avatar-upload' + (mode === 'avatar' ? ' show' : '');
+  if(el) el.classList.add('active');
+  const isBatchMode = currentTab === 'batch';
+  document.getElementById('blurOptions').style.display = (mode === 'blur' || isBatchMode) ? 'block' : 'none';
+  if (isBatchMode) {
+    document.getElementById('avatarSection').className = 'avatar-upload show';
+  } else {
+    document.getElementById('avatarSection').className = 'avatar-upload' + (mode === 'avatar' ? ' show' : '');
+  }
 }
 
 function selectDetectMode(mode, el) {
@@ -356,7 +440,7 @@ function onFileSelect(input) {
   if (files.length === 0) return;
   selectedFiles = files;
   
-  if (files.length === 1) {
+  if (files.length === 1 && !files[0].name.toLowerCase().endsWith('.zip')) {
     const reader = new FileReader();
     reader.onload = e => {
       originalDataUrl = e.target.result;
@@ -368,7 +452,7 @@ function onFileSelect(input) {
     reader.readAsDataURL(files[0]);
   } else {
     document.getElementById('previewImg').style.display = 'none';
-    document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 张图片</strong><br>批量处理模式下不支持预览原图`;
+    document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 个文件</strong><br>批量处理模式或 ZIP 包不支持预览原图`;
     document.getElementById('previewWrap').style.display = 'block';
   }
   
@@ -395,11 +479,11 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
-  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.name.toLowerCase().endsWith('.zip'));
   if (files.length > 0) {
     selectedFiles = files;
     
-    if (files.length === 1) {
+    if (files.length === 1 && !files[0].name.toLowerCase().endsWith('.zip')) {
       const reader = new FileReader();
       reader.onload = ev => {
         originalDataUrl = ev.target.result;
@@ -411,7 +495,7 @@ dropZone.addEventListener('drop', e => {
       reader.readAsDataURL(files[0]);
     } else {
       document.getElementById('previewImg').style.display = 'none';
-      document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 张图片</strong><br>批量处理模式下不支持预览原图`;
+      document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 个文件</strong><br>批量处理模式或 ZIP 包不支持预览原图`;
       document.getElementById('previewWrap').style.display = 'block';
     }
     
@@ -477,10 +561,16 @@ async function processImage() {
   formData.append('blur_strength', document.getElementById('blurStrength').value);
   formData.append('global_blur_strength', document.getElementById('globalBlurStrength').value);
 
+  if (currentTab === 'batch') {
+    formData.append('is_smart_batch', 'true');
+    formData.append('rule_single', document.getElementById('ruleSingle').value);
+    formData.append('rule_multi', document.getElementById('ruleMulti').value);
+  }
+
   const avatarFile = document.getElementById('avatarInput').files[0];
   if (avatarFile) formData.append('avatar', avatarFile);
 
-  const isBatch = selectedFiles.length > 1;
+  const isBatch = currentTab === 'batch';
   if (isBatch) {
     selectedFiles.forEach(file => formData.append('images', file));
   } else {
