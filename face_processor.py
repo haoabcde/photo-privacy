@@ -290,7 +290,7 @@ def apply_face_blur(image_bgr, faces, blur_strength=55):
 
 
 # ─── 主处理入口 ───────────────────────────────────────────────
-def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None):
+def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None, global_blur_strength=0):
     nparr = np.frombuffer(image_bytes, np.uint8)
     image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image_bgr is None:
@@ -301,12 +301,26 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
     face_count = len(faces)
 
     if face_count == 0:
-        _, buf = cv2.imencode(".jpg", image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        return buf.tobytes(), 0
+        # 如果未检测到人脸，依然可以应用全局模糊和降质
+        output = image_bgr.copy()
+    else:
+        output = apply_cartoon_avatar(image_bgr, faces, avatar_path) \
+                 if mode == "avatar" else \
+                 apply_face_blur(image_bgr, faces, blur_strength)
 
-    output = apply_cartoon_avatar(image_bgr, faces, avatar_path) \
-             if mode == "avatar" else \
-             apply_face_blur(image_bgr, faces, blur_strength)
+    # === 新增：全局融合与老照片感处理 ===
+    jpeg_quality = 95
+    if global_blur_strength > 0:
+        # 1. 极轻微的全局高斯模糊，消除拼接锐利感
+        sigma = global_blur_strength / 20.0
+        # 保证核大小为奇数，最大不超过 7，避免过度失焦
+        k_size = int(sigma * 2) | 1
+        k_size = min(k_size, 7)
+        if k_size >= 3:
+            output = cv2.GaussianBlur(output, (k_size, k_size), sigma)
+        
+        # 2. 动态降低 JPEG 质量 (95 -> 35) 产生自然包浆块
+        jpeg_quality = max(35, 95 - int(global_blur_strength * 0.6))
 
-    _, buf = cv2.imencode(".jpg", output, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    _, buf = cv2.imencode(".jpg", output, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
     return buf.tobytes(), face_count
