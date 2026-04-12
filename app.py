@@ -133,27 +133,56 @@ def batch_process():
     total_faces = 0
     processed_count = 0
 
+    # 提取所有待处理的图片 (filename, image_bytes)
+    images_to_process = []
+    
     try:
+        for file in files:
+            if not file.filename or not allowed_file(file.filename):
+                continue
+                
+            ext = file.filename.rsplit(".", 1)[1].lower()
+            if ext == "zip":
+                # 处理上传的 zip 文件
+                file_bytes = file.read()
+                with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as z:
+                    for zip_info in z.infolist():
+                        # 忽略目录和隐藏文件（如 macOS 的 __MACOSX 目录）
+                        if zip_info.is_dir() or zip_info.filename.startswith('__MACOSX') or zip_info.filename.startswith('.'):
+                            continue
+                        # 检查扩展名是否为允许的图片
+                        if "." in zip_info.filename:
+                            inner_ext = zip_info.filename.rsplit(".", 1)[1].lower()
+                            if inner_ext in {"jpg", "jpeg", "png", "webp", "bmp"}:
+                                img_bytes = z.read(zip_info.filename)
+                                # 提取纯文件名，忽略在 zip 中的路径
+                                base_name = os.path.basename(zip_info.filename)
+                                images_to_process.append((base_name, img_bytes))
+            else:
+                # 处理普通图片文件
+                images_to_process.append((file.filename, file.read()))
+                
+        if not images_to_process:
+            return jsonify({"success": False, "error": "未在上传的文件或 ZIP 中找到有效的图片"}), 400
+
         with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for file in files:
-                if file.filename and allowed_file(file.filename):
-                    image_bytes = file.read()
-                    result_bytes, face_count = process_image(
-                        image_bytes,
-                        mode=mode,
-                        detect_mode=detect_mode,
-                        blur_strength=blur_strength,
-                        avatar_path=avatar_path,
-                        global_blur_strength=global_blur_strength,
-                        is_smart_batch=is_smart_batch,
-                        rule_single=rule_single,
-                        rule_multi=rule_multi
-                    )
-                    total_faces += face_count
-                    processed_count += 1
-                    # 避免同名文件覆盖，加上 uuid
-                    safe_name = f"{uuid.uuid4().hex[:6]}_{file.filename}"
-                    zipf.writestr(safe_name, result_bytes)
+            for filename, image_bytes in images_to_process:
+                result_bytes, face_count = process_image(
+                    image_bytes,
+                    mode=mode,
+                    detect_mode=detect_mode,
+                    blur_strength=blur_strength,
+                    avatar_path=avatar_path,
+                    global_blur_strength=global_blur_strength,
+                    is_smart_batch=is_smart_batch,
+                    rule_single=rule_single,
+                    rule_multi=rule_multi
+                )
+                total_faces += face_count
+                processed_count += 1
+                # 避免同名文件覆盖，加上 uuid
+                safe_name = f"{uuid.uuid4().hex[:6]}_{filename}"
+                zipf.writestr(safe_name, result_bytes)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
