@@ -285,7 +285,7 @@
       <input type="file" id="imageInput" accept="image/*" onchange="onFileSelect(this)" />
       <div class="upload-icon">📷</div>
       <p><strong>点击选择</strong>或拖拽 1 张图片到此处</p>
-      <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持批量处理 JPG / PNG / WEBP，单次最大 20MB</p>
+      <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持处理 JPG / PNG / WEBP，单次最大 500MB</p>
     </div>
     <div id="previewWrap">
       <img id="previewImg" src="" alt="预览" />
@@ -391,6 +391,7 @@ function switchTab(tab) {
     document.getElementById('imageInput').removeAttribute('multiple');
     document.getElementById('imageInput').accept = 'image/*';
     document.getElementById('dropZone').querySelector('p').innerHTML = '<strong>点击选择</strong>或拖拽 1 张图片到此处';
+    document.getElementById('dropZone').querySelectorAll('p')[1].innerHTML = '支持处理 JPG / PNG / WEBP，单次最大 500MB';
     
     // 触发一下 selectMode 恢复状态
     selectMode(currentMode, document.querySelector('.mode-selector .mode-btn.active'));
@@ -409,6 +410,7 @@ function switchTab(tab) {
     document.getElementById('imageInput').setAttribute('multiple', 'multiple');
     document.getElementById('imageInput').accept = 'image/*,.zip';
     document.getElementById('dropZone').querySelector('p').innerHTML = '<strong>点击选择</strong>或拖拽多张图片 / ZIP 压缩包到此处';
+    document.getElementById('dropZone').querySelectorAll('p')[1].innerHTML = '支持批量处理 JPG / PNG / WEBP 或包含图片的 ZIP 包，单次最大 500MB';
     
     document.getElementById('avatarSection').className = 'avatar-upload show'; // 批处理可能用到头像
     document.getElementById('blurOptions').style.display = 'block';   // 批处理可能用到模糊
