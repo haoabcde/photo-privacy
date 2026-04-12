@@ -21,7 +21,7 @@ def get_resource_path(relative_path):
 app = Flask(__name__,
             static_folder=get_resource_path("static"),
             template_folder=get_resource_path("templates"))
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB
 
 USER_DATA_DIR = os.path.expanduser("~/.photo_privacy")
 UPLOAD_FOLDER = os.path.join(USER_DATA_DIR, "uploads")
