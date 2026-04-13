@@ -163,12 +163,18 @@ def _resolve_detect_mode(mode, detect_mode=None):
     return "single" if mode == "avatar" else "multi"
 
 
-def detect_single_face(image_bgr, yunet_boxes):
-    boxes = yunet_boxes if yunet_boxes else _nms(_detect_haar(image_bgr), iou_thr=0.3)
+def detect_single_face(image_bgr, yunet_boxes, strict=False):
+    if strict:
+        boxes = yunet_boxes
+    else:
+        boxes = yunet_boxes if yunet_boxes else _nms(_detect_haar(image_bgr), iou_thr=0.3)
     return _select_primary_face(boxes, image_bgr.shape)
 
 
-def detect_multi_faces(image_bgr, yunet_boxes):
+def detect_multi_faces(image_bgr, yunet_boxes, strict=False):
+    if strict:
+        return yunet_boxes
+        
     boxes = yunet_boxes
     if len(boxes) == 0:
         boxes = _detect_haar(image_bgr)
@@ -181,20 +187,21 @@ def detect_multi_faces(image_bgr, yunet_boxes):
 
 # ─── 主检测入口 ───────────────────────────────────────────────
 def detect_faces(image_bgr, mode="blur", detect_mode=None,
-                 pad_ratio_x=0.12, pad_ratio_top=0.28, pad_ratio_bot=0.10):
+                 pad_ratio_x=0.12, pad_ratio_top=0.28, pad_ratio_bot=0.10, strict=False):
     """
     多级人脸检测：
-    - `detect_mode=single`：优先 YuNet，仅保留最可信主脸，避免把背景/身体误判成额外人脸
-    - `detect_mode=multi`：YuNet 为主，小数量时再用 Haar 补充漏检
+    - strict=True：仅使用 YuNet 并提高置信度阈值，禁用 Haar 兜底，防止批处理风景图误识别
     """
     detect_mode = _resolve_detect_mode(mode, detect_mode)
     h_img, w_img = image_bgr.shape[:2]
-    yunet_boxes = _nms(_detect_yunet(image_bgr, conf_thr=0.55), iou_thr=0.3)
+    
+    conf_thr = 0.65 if strict else 0.55
+    yunet_boxes = _nms(_detect_yunet(image_bgr, conf_thr=conf_thr), iou_thr=0.3)
 
     if detect_mode == "single":
-        boxes = detect_single_face(image_bgr, yunet_boxes)
+        boxes = detect_single_face(image_bgr, yunet_boxes, strict)
     else:
-        boxes = detect_multi_faces(image_bgr, yunet_boxes)
+        boxes = detect_multi_faces(image_bgr, yunet_boxes, strict)
 
     # 扩大边界框，保证整张脸都在框内
     padded = []
@@ -277,15 +284,46 @@ def apply_cartoon_avatar(image_bgr, faces, avatar_path=None):
 
 # ─── 功能 2：人脸模糊 ─────────────────────────────────────────
 def apply_face_blur(image_bgr, faces, blur_strength=55):
-    """纯净高斯模糊，只处理人脸区域，其余完全高清，消除强烈的马赛克（二维码）感"""
+    """纯净高斯模糊，只处理人脸区域，边缘平滑过渡（羽化），自然融合"""
     result = image_bgr.copy()
-    ks = blur_strength | 1   # 保证奇数
-    # 根据 blur_strength 动态调整模糊强度 (sigma)
-    sigma = blur_strength / 3.0
+    
     for (x, y, w, h) in faces:
-        roi = result[y:y+h, x:x+w]
+        x1, y1 = max(0, x), max(0, y)
+        x2, y2 = min(result.shape[1], x+w), min(result.shape[0], y+h)
+        if x2 <= x1 or y2 <= y1:
+            continue
+            
+        roi = result[y1:y2, x1:x2]
+        
+        # 动态计算核大小（基于人脸实际大小），让模糊更加轻微自然
+        # blur_strength (15~99) 映射到相对脸部宽度的 2% ~ 12% 左右
+        # 这样即使 99 也不会完全糊成马赛克，而是一种自然的景深/失焦模糊感
+        ratio = (blur_strength / 100.0) * 0.12 
+        ks = int(max(w, h) * ratio)
+        ks = max(3, ks | 1)  # 保证奇数且至少为 3
+        
+        sigma = ks / 3.0
         blurred = cv2.GaussianBlur(roi, (ks, ks), sigma)
-        result[y:y+h, x:x+w] = blurred
+        
+        # 创建羽化遮罩（椭圆形渐变）以实现自然边缘融合
+        mask = np.zeros((y2-y1, x2-x1), dtype=np.float32)
+        center = ((x2-x1)//2, (y2-y1)//2)
+        axes = (int((x2-x1)*0.45), int((y2-y1)*0.45))
+        
+        if axes[0] > 0 and axes[1] > 0:
+            cv2.ellipse(mask, center, axes, 0, 0, 360, 1.0, -1)
+            # 羽化核大小也跟脸部尺寸相关，做到平滑过渡
+            feather_ks = int(max(w, h) * 0.25) | 1
+            feather_ks = max(3, feather_ks)
+            mask = cv2.GaussianBlur(mask, (feather_ks, feather_ks), 0)
+        else:
+            mask += 1.0
+            
+        mask = mask[..., np.newaxis]  # 扩展为 3 通道以便与图像相乘
+        
+        # 将模糊后的图像与原图按照羽化遮罩进行平滑融合
+        result[y1:y2, x1:x2] = (blurred * mask + roi * (1 - mask)).astype(np.uint8)
+        
     return result
 
 
@@ -297,8 +335,8 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
     if image_bgr is None:
         raise ValueError("无法读取图片")
 
-    # 全量检测人脸，不刻意过滤（使用 multi 策略获取所有人脸）
-    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi")
+    # 全量检测人脸，批处理时启用严格模式防止风景图误识别
+    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
     face_count = len(faces)
 
     if is_smart_batch:
@@ -310,7 +348,7 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
             if rule_single == "keep":
                 return image_bytes, 1
             # 若不是 keep，再用 single 策略精准定位那一张脸
-            faces = detect_faces(image_bgr, mode="blur", detect_mode="single")
+            faces = detect_faces(image_bgr, mode="blur", detect_mode="single", strict=is_smart_batch)
             output = apply_cartoon_avatar(image_bgr, faces, avatar_path) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
         else: # face_count >= 2
             if rule_multi == "global_blur_only":
@@ -320,7 +358,7 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
     else:
         # 单张精修逻辑（旧有逻辑）
         detect_mode = _resolve_detect_mode(mode, detect_mode)
-        faces = detect_faces(image_bgr, mode=mode, detect_mode=detect_mode)
+        faces = detect_faces(image_bgr, mode=mode, detect_mode=detect_mode, strict=False)
         face_count = len(faces)
         if face_count == 0:
             output = image_bgr.copy()
