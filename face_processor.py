@@ -34,7 +34,8 @@ def _resize_for_preview(image_bgr, max_side=900):
     nw, nh = int(w * scale), int(h * scale)
     if nw < 1 or nh < 1:
         return image_bgr
-    return cv2.resize(image_bgr, (nw, nh))
+    # 快速插值算法，缩短执行时间
+    return cv2.resize(image_bgr, (nw, nh), interpolation=cv2.INTER_NEAREST)
 
 def _map_strength(strength):
     try:
@@ -62,41 +63,77 @@ def get_resource_path(relative_path):
 
 # ─── 模型路径 ────────────────────────────────────────────────
 _YUNET_PATH = get_resource_path(os.path.join("models", "face_detection_yunet_2023mar.onnx"))
-_DATA_DIR   = cv2.data.haarcascades
 
-# ─── Haar Cascade 兜底 ───────────────────────────────────────
-_haar_default = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_frontalface_default.xml"))
-_haar_alt2    = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_frontalface_alt2.xml"))
-_haar_profile = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_profileface.xml"))
+# 懒加载全局变量，提高启动速度
+_yunet_detector_cache = {}
+_haar_default = None
+_haar_alt2 = None
+_haar_profile = None
+_DATA_DIR = cv2.data.haarcascades
+
+def _get_yunet_detector(nw, nh, conf_thr):
+    """复用 YuNet 检测器实例，避免每次重新初始化"""
+    key = (nw, nh, conf_thr)
+    if key not in _yunet_detector_cache:
+        _yunet_detector_cache[key] = cv2.FaceDetectorYN.create(
+            _YUNET_PATH, "", (nw, nh),
+            score_threshold=conf_thr,
+            nms_threshold=0.3,
+            top_k=100
+        )
+    return _yunet_detector_cache[key]
+
+def _init_haar():
+    """懒加载 Haar 模型"""
+    global _haar_default, _haar_alt2, _haar_profile
+    if _haar_default is None:
+        _haar_default = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_frontalface_default.xml"))
+        _haar_alt2    = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_frontalface_alt2.xml"))
+        _haar_profile = cv2.CascadeClassifier(os.path.join(_DATA_DIR, "haarcascade_profileface.xml"))
 
 
-# ─── IoU / NMS ───────────────────────────────────────────────
-def _iou(a, b):
-    ax1, ay1 = a[0], a[1]
-    ax2, ay2 = a[0]+a[2], a[1]+a[3]
-    bx1, by1 = b[0], b[1]
-    bx2, by2 = b[0]+b[2], b[1]+b[3]
-    ix = max(0, min(ax2, bx2) - max(ax1, bx1))
-    iy = max(0, min(ay2, by2) - max(ay1, by1))
-    inter = ix * iy
-    if inter == 0:
-        return 0.0
-    return inter / float(a[2]*a[3] + b[2]*b[3] - inter)
-
-
+# ─── NMS ───────────────────────────────────────────────
 def _nms(boxes, iou_thr=0.35):
     if not boxes:
         return []
-    boxes = sorted(boxes, key=lambda b: b[2]*b[3], reverse=True)
-    kept, used = [], [False]*len(boxes)
-    for i in range(len(boxes)):
-        if used[i]:
-            continue
-        kept.append(boxes[i])
-        for j in range(i+1, len(boxes)):
-            if not used[j] and _iou(boxes[i], boxes[j]) > iou_thr:
-                used[j] = True
-    return kept
+    
+    # 将 list of tuples 转换为 float 类型的 numpy 数组，加速计算
+    boxes_np = np.array(boxes, dtype=np.float32)
+    x1 = boxes_np[:, 0]
+    y1 = boxes_np[:, 1]
+    w = boxes_np[:, 2]
+    h = boxes_np[:, 3]
+    x2 = x1 + w
+    y2 = y1 + h
+    
+    areas = w * h
+    order = areas.argsort()[::-1]  # 按面积从大到小排序
+    
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(boxes[i])
+        
+        if order.size == 1:
+            break
+            
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+        
+        w_inter = np.maximum(0.0, xx2 - xx1)
+        h_inter = np.maximum(0.0, yy2 - yy1)
+        inter = w_inter * h_inter
+        
+        # 计算 IoU
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        
+        # 找到 IoU 小于等于阈值的框，保留它们
+        inds = np.where(ovr <= iou_thr)[0]
+        order = order[inds + 1]
+        
+    return keep
 
 
 # ─── YuNet 检测 ───────────────────────────────────────────────
@@ -116,14 +153,10 @@ def _detect_yunet(image_bgr, conf_thr=0.6):
     for scale in scales:
         nw = int(w * scale)
         nh = int(h * scale)
-        img_s = cv2.resize(image_bgr, (nw, nh)) if scale != 1.0 else image_bgr
+        # 使用 INTER_NEAREST 或 INTER_LINEAR 加速 resize
+        img_s = cv2.resize(image_bgr, (nw, nh), interpolation=cv2.INTER_NEAREST) if scale != 1.0 else image_bgr
 
-        detector = cv2.FaceDetectorYN.create(
-            _YUNET_PATH, "", (nw, nh),
-            score_threshold=conf_thr,
-            nms_threshold=0.3,
-            top_k=100
-        )
+        detector = _get_yunet_detector(nw, nh, conf_thr)
         _, faces = detector.detect(img_s)
         if faces is None:
             continue
@@ -144,6 +177,7 @@ def _detect_yunet(image_bgr, conf_thr=0.6):
 
 # ─── Haar 兜底检测 ────────────────────────────────────────────
 def _detect_haar(image_bgr):
+    _init_haar()
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     h, w = image_bgr.shape[:2]
@@ -254,7 +288,13 @@ def detect_faces(image_bgr, mode="blur", detect_mode="multi",
 
 
 # ─── 卡通头像生成 ─────────────────────────────────────────────
+_cartoon_avatar_cache = {}
+
 def generate_cartoon_avatar(size, index=0):
+    cache_key = (size, index)
+    if cache_key in _cartoon_avatar_cache:
+        return _cartoon_avatar_cache[cache_key]
+
     palettes = [
         ("#FFD700", "#E07B00"),
         ("#87CEEB", "#1565C0"),
@@ -300,6 +340,7 @@ def generate_cartoon_avatar(size, index=0):
     for ex in [cx-eox, cx+eox]:
         draw.ellipse([ex-blush_r, blush_y-blush_r//2,
                       ex+blush_r, blush_y+blush_r//2], fill=blush)
+    _cartoon_avatar_cache[cache_key] = img
     return img
 
 
@@ -320,7 +361,8 @@ def apply_cartoon_avatar(image_bgr, faces, avatar_path=None, avatar_bytes=None):
                 avatar = None
         if avatar is None:
             avatar = generate_cartoon_avatar(max(w, h), index=i)
-        avatar = avatar.resize((w, h), Image.LANCZOS)
+        # 使用快速插值
+        avatar = avatar.resize((w, h), Image.NEAREST)
         px = x + (w - avatar.width) // 2
         py = y + (h - avatar.height) // 2
         pil_img.paste(avatar, (px, py), avatar)
@@ -330,6 +372,9 @@ def apply_cartoon_avatar(image_bgr, faces, avatar_path=None, avatar_bytes=None):
 # ─── 功能 2：人脸模糊 ─────────────────────────────────────────
 def apply_face_blur(image_bgr, faces, blur_strength=55):
     """纯净高斯模糊，只处理人脸区域，边缘平滑过渡（羽化），自然融合"""
+    if not faces:
+        return image_bgr
+    
     result = image_bgr.copy()
     
     for (x, y, w, h) in faces:
@@ -383,6 +428,8 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
     faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
     face_count = len(faces)
 
+    output = image_bgr # 默认不复制，除非需要修改
+
     if is_smart_batch:
         # 智能批处理路由逻辑
         if face_count == 0:
@@ -396,15 +443,13 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
             output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
         else: # face_count >= 2
             if rule_multi == "global_blur_only":
-                output = image_bgr.copy() # 不模糊人脸，仅走下方全局模糊
+                output = image_bgr # 不模糊人脸，仅走下方全局模糊
             else: # rule_multi == "blur_faces"
                 output = apply_face_blur(image_bgr, faces, blur_strength)
     else:
         # 单张精修逻辑：直接全量检测所有面部，统一处理
-        faces = detect_faces(image_bgr, mode=mode, detect_mode="multi", strict=False)
-        face_count = len(faces)
         if face_count == 0:
-            output = image_bgr.copy()
+            output = image_bgr
         else:
             output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
 
@@ -442,10 +487,10 @@ def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, ava
 
     if is_smart_batch:
         if face_count == 0:
-            output = image_bgr.copy()
+            output = image_bgr
         elif face_count == 1:
             if rule_single == "keep":
-                output = image_bgr.copy()
+                output = image_bgr
             else:
                 faces = detect_faces(image_bgr, mode="blur", detect_mode="single", strict=is_smart_batch)
                 if rule_single == "avatar":
@@ -454,19 +499,14 @@ def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, ava
                     output = apply_face_blur(image_bgr, faces, blur_strength)
         else:
             if rule_multi == "global_blur_only":
-                output = image_bgr.copy()
+                output = image_bgr
             else:
                 output = apply_face_blur(image_bgr, faces, blur_strength)
     else:
-        faces = detect_faces(image_bgr, mode=mode, detect_mode="multi", strict=False)
-        face_count = len(faces)
         if face_count == 0:
-            output = image_bgr.copy()
+            output = image_bgr
         else:
-            if mode == "avatar":
-                output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
-            else:
-                output = apply_face_blur(image_bgr, faces, blur_strength)
+            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
 
     if global_blur_strength > 0:
         sigma = global_blur_strength / 20.0

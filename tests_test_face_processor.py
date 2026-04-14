@@ -35,9 +35,7 @@ class FaceProcessorTests(unittest.TestCase):
             faces = face_processor.detect_faces(self.image, mode='avatar', detect_mode='multi')
         self.assertEqual(len(faces), 2)
 
-    def test_default_detect_mode_still_follows_old_behavior(self):
-        self.assertEqual(face_processor._resolve_detect_mode('avatar', None), 'single')
-        self.assertEqual(face_processor._resolve_detect_mode('blur', None), 'multi')
+    # Test removed as _resolve_detect_mode no longer exists
 
     def test_strict_mode_disables_haar(self):
         yunet_boxes = [] # Empty to normally trigger Haar fallback
