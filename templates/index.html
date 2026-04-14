@@ -36,6 +36,33 @@
       margin-bottom: 20px;
     }
 
+    .ui-mode-toggle {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-left: 12px;
+    }
+
+    .ui-toggle-btn {
+      border: 1px solid #ddd;
+      background: #fafafa;
+      color: #555;
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: .85rem;
+      font-weight: 700;
+      transition: all .2s;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .ui-toggle-btn:hover { border-color: #667eea; color: #333; background: #f0f1ff; }
+    .ui-toggle-btn.active { border-color: #667eea; background: linear-gradient(135deg, #eef0ff, #f5f0ff); color: #333; }
+
+    body[data-ui-mode="simple"] .pro-only { display: none !important; }
+    body[data-ui-mode="pro"] .simple-only { display: none !important; }
+
     /* 模式选择 */
     .mode-selector {
       display: flex;
@@ -106,6 +133,12 @@
       color: #667eea; font-size: 1rem;
     }
 
+    .builtin-avatars { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; margin-bottom: 12px; }
+    .builtin-avatar-item { width: 50px; height: 50px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.2s; background: #f0f0f0; padding: 5px; }
+    .builtin-avatar-item:hover { transform: scale(1.1); }
+    .builtin-avatar-item.selected { border-color: #007bff; background: #eef0ff; }
+    .builtin-avatar-item img { width: 100%; height: 100%; object-fit: contain; }
+
     /* 自定义头像上传 */
     .avatar-upload { display: none; margin-top: 16px; }
     .avatar-upload.show { display: block; }
@@ -168,6 +201,16 @@
       box-shadow: 0 4px 20px rgba(0,0,0,.1);
     }
 
+    .preview-empty {
+      border-radius: 12px;
+      border: 1px dashed #ddd;
+      background: #fafafa;
+      color: #888;
+      padding: 18px 14px;
+      font-size: .88rem;
+      line-height: 1.5;
+    }
+
     .info-bar {
       background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
       border-radius: 10px; padding: 12px 16px;
@@ -199,10 +242,6 @@
     }
     .btn-reset:hover { background: #ebebeb; }
 
-    /* 预览图（上传后） */
-    #previewWrap { display: none; margin-top: 16px; text-align: center; }
-    #previewImg { max-height: 220px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
-
     footer { text-align: center; color: rgba(255,255,255,.6); margin-top: 24px; font-size: .82rem; }
   </style>
 </head>
@@ -215,9 +254,15 @@
 
   <div class="card">
     <!-- Tab 切换 -->
-    <div class="tabs" style="display:flex; margin-bottom: 20px; border-bottom: 1px solid #eee;">
-      <button class="tab-btn active" id="tabSingle" onclick="switchTab('single')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid #007bff; font-weight:bold; cursor:pointer; color:#333;">单张精修</button>
-      <button class="tab-btn" id="tabBatch" onclick="switchTab('batch')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid transparent; color:#666; cursor:pointer;">智能批处理</button>
+    <div class="tabs" style="display:flex; align-items:center; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid #eee;">
+      <div style="display:flex; flex:1;">
+        <button class="tab-btn active" id="tabSingle" onclick="switchTab('single')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid #007bff; font-weight:bold; cursor:pointer; color:#333;">单张精修</button>
+        <button class="tab-btn" id="tabBatch" onclick="switchTab('batch')" style="flex:1; padding:10px; background:none; border:none; border-bottom:2px solid transparent; color:#666; cursor:pointer;">智能批处理</button>
+      </div>
+      <div class="ui-mode-toggle" role="tablist" aria-label="界面模式">
+        <button class="ui-toggle-btn active" id="uiModeSimpleBtn" type="button" onclick="setUiMode('simple')">简单模式</button>
+        <button class="ui-toggle-btn" id="uiModeProBtn" type="button" onclick="setUiMode('pro')">专业模式</button>
+      </div>
     </div>
 
     <!-- 单张精修专属设置 -->
@@ -238,8 +283,8 @@
     </div>
 
     <!-- 人数场景 -->
-    <div class="section-label">人数场景（手动指定检测策略）</div>
-    <div class="detect-selector">
+    <div class="section-label pro-only">人数场景（手动指定检测策略）</div>
+    <div class="detect-selector pro-only">
       <div class="mode-btn active" data-detect-mode="single" onclick="selectDetectMode('single', this)">
         <div class="icon">👤</div>
         <div class="title">单人</div>
@@ -254,7 +299,7 @@
     </div>
 
     <!-- 智能批处理专属设置 -->
-    <div id="batchSettings" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+    <div id="batchSettings" class="pro-only" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
       <div class="section-label" style="margin-top:0;">批处理智能规则</div>
       
       <div style="margin-bottom: 12px;">
@@ -287,13 +332,17 @@
       <p><strong>点击选择</strong>或拖拽 1 张图片到此处</p>
       <p style="margin-top:6px; font-size:.8rem; color:#bbb">支持处理 JPG / PNG / WEBP，单次最大 500MB</p>
     </div>
-    <div id="previewWrap">
-      <img id="previewImg" src="" alt="预览" />
-      <p style="font-size:.82rem;color:#aaa;margin-top:6px;">原图预览</p>
-    </div>
 
     <!-- 选项 -->
-    <div class="options" id="blurOptions" style="display:none;">
+    <div class="options">
+      <label>总强度（0-100）</label>
+      <div class="slider-row">
+        <input type="range" id="strength" min="0" max="100" step="1" value="40" />
+        <span class="slider-val" id="strengthVal">40</span>
+      </div>
+    </div>
+
+    <div class="options pro-only" id="blurOptions" style="display:none;">
       <label>局部人脸模糊强度</label>
       <div class="slider-row">
         <input type="range" id="blurStrength" min="15" max="99" step="2" value="55"
@@ -303,7 +352,7 @@
     </div>
 
     <!-- 全局画质融合选项（对所有模式和批量生效） -->
-    <div class="options">
+    <div class="options pro-only">
       <label>整体融合/老照片包浆感（使处理痕迹更自然）</label>
       <div class="slider-row">
         <input type="range" id="globalBlurStrength" min="0" max="100" step="1" value="0"
@@ -313,10 +362,38 @@
     </div>
 
     <div class="avatar-upload" id="avatarSection">
-      <label>自定义头像（可选，留空则使用自动生成的卡通头像）</label>
+      <label>选择卡通头像（或上传自定义）</label>
+      
+      <div class="builtin-avatars" id="builtinAvatars">
+        <div class="builtin-avatar-item selected" data-avatar="" onclick="selectBuiltinAvatar(this, '')">
+          <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:#888;">随机</div>
+        </div>
+        <div class="builtin-avatar-item" data-avatar="dog.png" onclick="selectBuiltinAvatar(this, 'dog.png')">
+          <img src="/static/avatars/built-in/dog.png" alt="dog">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="cat.png" onclick="selectBuiltinAvatar(this, 'cat.png')">
+          <img src="/static/avatars/built-in/cat.png" alt="cat">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="panda.png" onclick="selectBuiltinAvatar(this, 'panda.png')">
+          <img src="/static/avatars/built-in/panda.png" alt="panda">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="fox.png" onclick="selectBuiltinAvatar(this, 'fox.png')">
+          <img src="/static/avatars/built-in/fox.png" alt="fox">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="tiger.png" onclick="selectBuiltinAvatar(this, 'tiger.png')">
+          <img src="/static/avatars/built-in/tiger.png" alt="tiger">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="rabbit.png" onclick="selectBuiltinAvatar(this, 'rabbit.png')">
+          <img src="/static/avatars/built-in/rabbit.png" alt="rabbit">
+        </div>
+        <div class="builtin-avatar-item" data-avatar="sunglasses.png" onclick="selectBuiltinAvatar(this, 'sunglasses.png')">
+          <img src="/static/avatars/built-in/sunglasses.png" alt="sunglasses">
+        </div>
+      </div>
+
       <div class="avatar-upload-box">
         <input type="file" id="avatarInput" accept="image/*" onchange="onAvatarSelect(this)" />
-        <p>点击上传自定义头像图片</p>
+        <p>或点击此处上传自定义头像图片</p>
         <img id="avatarPreview" src="" alt="头像预览" />
       </div>
     </div>
@@ -326,10 +403,6 @@
       <button class="btn-process" id="processBtn" onclick="processImage()" disabled style="flex:1;">
         ✨ 开始处理
       </button>
-      <button class="btn-process" id="debugBtn" onclick="debugBoxes()" disabled
-              style="flex:0 0 auto;width:auto;padding:15px 18px;background:linear-gradient(135deg,#546e7a,#263238);font-size:.88rem;">
-        🔍 检测框预览
-      </button>
     </div>
 
     <!-- 进度条 -->
@@ -337,6 +410,23 @@
       <div class="progress-bar"><div class="progress-fill"></div></div>
       <p class="progress-tip" id="progressTip">🔍 正在检测人脸并处理，请稍候...</p>
     </div>
+  </div>
+
+  <div class="card" id="realtimePreviewCard">
+    <div class="section-label" style="margin-top:0;">实时预览</div>
+    <div class="compare-wrap">
+      <div class="compare-item">
+        <div class="label">原图</div>
+        <div id="previewOriginalEmpty" class="preview-empty">未选择图片，将使用示例图预览</div>
+        <img id="previewOriginalImg" src="" alt="原图预览" style="display:none;" />
+      </div>
+      <div class="compare-item">
+        <div class="label">处理后</div>
+        <div id="previewResultEmpty" class="preview-empty">拖动强度滑杆查看效果</div>
+        <img id="previewResultImg" src="" alt="处理后预览" style="display:none;" />
+      </div>
+    </div>
+    <div id="previewError" class="info-bar warn" style="display:none; margin-top: 12px;"></div>
   </div>
 
   <!-- 结果区 -->
@@ -352,12 +442,7 @@
         <img id="resultImg" src="" alt="处理结果" />
       </div>
     </div>
-    <!-- 调试图说明 -->
-    <div id="debugLegend" style="display:none;margin:12px 0;padding:10px 14px;background:#f5f5f5;border-radius:8px;font-size:.83rem;color:#555;">
-      <span style="color:#008800;font-weight:600;">■ 绿框</span> YuNet深度学习检测 &nbsp;
-      <span style="color:#e65100;font-weight:600;">■ 橙框</span> Haar传统检测 &nbsp;
-      <span style="color:#cc0000;font-weight:600;">■ 红框（编号）</span> 最终输出结果
-    </div>
+
     <div style="text-align:center;">
       <a class="btn-download" id="downloadBtn" href="#" download>⬇️ 下载处理后图片</a>
       <button class="btn-reset" onclick="reset()">🔄 重新处理</button>
@@ -373,6 +458,11 @@ let currentDetectMode = 'single';
 let selectedFiles = [];
 let originalDataUrl = null;
 let currentTab = 'single'; // 默认单张模式
+let uiMode = 'simple';
+let previewDebounceTimer = null;
+let previewController = null;
+let previewObjectUrl = null;
+let isInitializing = true;
 
 function switchTab(tab) {
   currentTab = tab;
@@ -403,7 +493,7 @@ function switchTab(tab) {
     document.getElementById('tabSingle').style.fontWeight = 'normal';
     document.getElementById('tabSingle').style.color = '#666';
     
-    document.getElementById('singleSettings').style.display = 'none';
+    document.getElementById('singleSettings').style.display = 'block';
     document.getElementById('batchSettings').style.display = 'block';
     
     // 允许批量和 ZIP
@@ -418,6 +508,14 @@ function switchTab(tab) {
   reset();
 }
 
+function setUiMode(mode) {
+  uiMode = mode;
+  document.body.dataset.uiMode = mode;
+  document.getElementById('uiModeSimpleBtn').classList.toggle('active', mode === 'simple');
+  document.getElementById('uiModeProBtn').classList.toggle('active', mode === 'pro');
+  schedulePreview(true);
+}
+
 function selectMode(mode, el) {
   currentMode = mode;
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
@@ -429,12 +527,28 @@ function selectMode(mode, el) {
   } else {
     document.getElementById('avatarSection').className = 'avatar-upload' + (mode === 'avatar' ? ' show' : '');
   }
+  schedulePreview(true);
 }
 
 function selectDetectMode(mode, el) {
   currentDetectMode = mode;
   document.querySelectorAll('[data-detect-mode]').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
+}
+
+let selectedBuiltinAvatar = '';
+
+function selectBuiltinAvatar(el, filename) {
+  document.querySelectorAll('.builtin-avatar-item').forEach(item => item.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedBuiltinAvatar = filename;
+  
+  // Clear custom upload if builtin is selected
+  if (filename) {
+    document.getElementById('avatarInput').value = '';
+    document.getElementById('avatarPreview').style.display = 'none';
+  }
+  schedulePreview(true);
 }
 
 function onFileSelect(input) {
@@ -446,30 +560,37 @@ function onFileSelect(input) {
     const reader = new FileReader();
     reader.onload = e => {
       originalDataUrl = e.target.result;
-      document.getElementById('previewImg').src = e.target.result;
-      document.getElementById('previewImg').style.display = 'inline-block';
-      document.getElementById('previewWrap').querySelector('p').textContent = '原图预览';
-      document.getElementById('previewWrap').style.display = 'block';
+      document.getElementById('previewOriginalImg').src = e.target.result;
+      document.getElementById('previewOriginalImg').style.display = 'block';
+      document.getElementById('previewOriginalEmpty').style.display = 'none';
+      schedulePreview(true);
     };
     reader.readAsDataURL(files[0]);
   } else {
-    document.getElementById('previewImg').style.display = 'none';
-    document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 个文件</strong><br>批量处理模式或 ZIP 包不支持预览原图`;
-    document.getElementById('previewWrap').style.display = 'block';
+    originalDataUrl = null;
+    document.getElementById('previewOriginalImg').style.display = 'none';
+    document.getElementById('previewOriginalEmpty').style.display = 'block';
   }
   
   document.getElementById('processBtn').disabled = false;
-  document.getElementById('debugBtn').disabled = files.length > 1; // 调试框暂不支持批量
+    schedulePreview(true);
 }
 
 function onAvatarSelect(input) {
   const file = input.files[0];
   if (!file) return;
+  
+  // Clear built-in selection if custom is chosen
+  document.querySelectorAll('.builtin-avatar-item').forEach(item => item.classList.remove('selected'));
+  document.querySelector('.builtin-avatar-item[data-avatar=""]').classList.add('selected');
+  selectedBuiltinAvatar = '';
+
   const reader = new FileReader();
   reader.onload = e => {
     const preview = document.getElementById('avatarPreview');
     preview.src = e.target.result;
     preview.style.display = 'block';
+    schedulePreview(true);
   };
   reader.readAsDataURL(file);
 }
@@ -489,60 +610,121 @@ dropZone.addEventListener('drop', e => {
       const reader = new FileReader();
       reader.onload = ev => {
         originalDataUrl = ev.target.result;
-        document.getElementById('previewImg').src = ev.target.result;
-        document.getElementById('previewImg').style.display = 'inline-block';
-        document.getElementById('previewWrap').querySelector('p').textContent = '原图预览';
-        document.getElementById('previewWrap').style.display = 'block';
+        document.getElementById('previewOriginalImg').src = ev.target.result;
+        document.getElementById('previewOriginalImg').style.display = 'block';
+        document.getElementById('previewOriginalEmpty').style.display = 'none';
+        schedulePreview(true);
       };
       reader.readAsDataURL(files[0]);
     } else {
-      document.getElementById('previewImg').style.display = 'none';
-      document.getElementById('previewWrap').querySelector('p').innerHTML = `<strong>已选择 ${files.length} 个文件</strong><br>批量处理模式或 ZIP 包不支持预览原图`;
-      document.getElementById('previewWrap').style.display = 'block';
+      originalDataUrl = null;
+      document.getElementById('previewOriginalImg').style.display = 'none';
+      document.getElementById('previewOriginalEmpty').style.display = 'block';
     }
     
     document.getElementById('processBtn').disabled = false;
-    document.getElementById('debugBtn').disabled = files.length > 1;
+    schedulePreview(true);
   }
 });
 
-async function debugBoxes() {
-  if (selectedFiles.length === 0) return;
-  const btn = document.getElementById('debugBtn');
-  btn.disabled = true;
-  document.getElementById('progressTip').textContent = '🔍 正在分析人脸检测框，请稍候...';
-  document.getElementById('progressWrap').style.display = 'block';
-  document.getElementById('resultSection').style.display = 'none';
+function mapStrengthToParams(strength) {
+  const s = Math.max(0, Math.min(parseInt(strength, 10) || 0, 100));
+  const blurStrength = Math.round(15 + (s / 100) * 40);
+  const globalBlurStrength = Math.max(0, s - 40);
+  return { strength: s, blurStrength, globalBlurStrength };
+}
+
+function applyStrengthToAdvancedControls(strength) {
+  const mapped = mapStrengthToParams(strength);
+  const strengthEl = document.getElementById('strength');
+  const strengthValEl = document.getElementById('strengthVal');
+  strengthEl.value = String(mapped.strength);
+  strengthValEl.textContent = String(mapped.strength);
+
+  const blurEl = document.getElementById('blurStrength');
+  const blurValEl = document.getElementById('blurVal');
+  if (blurEl) {
+    blurEl.value = String(mapped.blurStrength);
+    if (blurValEl) blurValEl.textContent = String(mapped.blurStrength);
+  }
+
+  const globalEl = document.getElementById('globalBlurStrength');
+  const globalValEl = document.getElementById('globalBlurVal');
+  if (globalEl) {
+    globalEl.value = String(mapped.globalBlurStrength);
+    if (globalValEl) globalValEl.textContent = String(mapped.globalBlurStrength);
+  }
+}
+
+function schedulePreview(immediate) {
+  if (isInitializing) return;
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = null;
+  }
+  if (immediate) {
+    void triggerPreview();
+    return;
+  }
+  previewDebounceTimer = setTimeout(() => {
+    previewDebounceTimer = null;
+    void triggerPreview();
+  }, 300);
+}
+
+async function triggerPreview() {
+  const previewErrorEl = document.getElementById('previewError');
+  previewErrorEl.style.display = 'none';
+  previewErrorEl.textContent = '';
 
   const formData = new FormData();
-  formData.append('image', selectedFiles[0]);
+  formData.append('strength', document.getElementById('strength').value);
   formData.append('mode', currentMode);
-  formData.append('detect_mode', currentDetectMode);
-  try {
-    const resp = await fetch('/debug_boxes', { method: 'POST', body: formData });
-    const data = await resp.json();
-    document.getElementById('progressWrap').style.display = 'none';
-    if (!data.success) { alert('调试失败：' + data.error); btn.disabled = false; return; }
 
-    const infoBar = document.getElementById('infoBar');
-    infoBar.className = 'info-bar';
-    infoBar.innerHTML = `🔍 调试模式 — YuNet: <strong>${data.yunet_count}</strong> 张 · Haar: <strong>${data.haar_count}</strong> 张 · 最终: <strong>${data.final_count}</strong> 张`;
-
-    document.getElementById('leftLabel').textContent = '原图';
-    document.getElementById('rightLabel').textContent = '检测框（调试）';
-    document.getElementById('originalImg').src = originalDataUrl;
-    document.getElementById('resultImg').src = data.debug_url + '?t=' + Date.now();
-    document.getElementById('debugLegend').style.display = 'block';
-
-    const filename = data.debug_url.split('/').pop();
-    document.getElementById('downloadBtn').href = '/download/' + filename;
-    document.getElementById('resultSection').style.display = 'block';
-    document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
-  } catch (e) {
-    document.getElementById('progressWrap').style.display = 'none';
-    alert('网络错误：' + e.message);
+  if (currentTab === 'batch') {
+    formData.append('is_smart_batch', 'true');
+    const ruleSingleEl = document.getElementById('ruleSingle');
+    const ruleMultiEl = document.getElementById('ruleMulti');
+    if (ruleSingleEl) formData.append('rule_single', ruleSingleEl.value);
+    if (ruleMultiEl) formData.append('rule_multi', ruleMultiEl.value);
   }
-  btn.disabled = false;
+
+  const avatarFile = document.getElementById('avatarInput')?.files?.[0];
+  if (avatarFile) formData.append('avatar', avatarFile);
+
+  if (selectedBuiltinAvatar) formData.append('builtin_avatar', selectedBuiltinAvatar);
+
+  const canSendImage = selectedFiles.length === 1 && selectedFiles[0] && !selectedFiles[0].name.toLowerCase().endsWith('.zip');
+  if (canSendImage) {
+    formData.append('image', selectedFiles[0]);
+  } else {
+    formData.append('sample_id', 'default');
+  }
+
+  if (previewController) previewController.abort();
+  previewController = new AbortController();
+
+  try {
+    const resp = await fetch('/preview', { method: 'POST', body: formData, signal: previewController.signal });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = URL.createObjectURL(blob);
+
+    const img = document.getElementById('previewResultImg');
+    img.src = previewObjectUrl;
+    img.style.display = 'block';
+    document.getElementById('previewResultEmpty').style.display = 'none';
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    previewErrorEl.style.display = 'flex';
+    previewErrorEl.textContent = '⚠️ 实时预览失败：' + (e && e.message ? e.message : String(e));
+    document.getElementById('previewResultImg').style.display = 'none';
+    document.getElementById('previewResultEmpty').style.display = 'block';
+  }
 }
 
 async function processImage() {
@@ -560,6 +742,7 @@ async function processImage() {
   const formData = new FormData();
   formData.append('mode', currentMode);
   formData.append('detect_mode', currentDetectMode);
+  formData.append('strength', document.getElementById('strength').value);
   formData.append('blur_strength', document.getElementById('blurStrength').value);
   formData.append('global_blur_strength', document.getElementById('globalBlurStrength').value);
 
@@ -571,6 +754,8 @@ async function processImage() {
 
   const avatarFile = document.getElementById('avatarInput').files[0];
   if (avatarFile) formData.append('avatar', avatarFile);
+
+  if (selectedBuiltinAvatar) formData.append('builtin_avatar', selectedBuiltinAvatar);
 
   const isBatch = currentTab === 'batch';
   if (isBatch) {
@@ -598,15 +783,42 @@ async function processImage() {
     const detectText = data.detect_mode === 'multi' ? '多人策略' : '单人策略';
 
     if (isBatch) {
-      infoBar.className = 'info-bar';
-      infoBar.innerHTML = `✅ 批量处理完成！共处理 <strong>${data.processed_count}</strong> 张图片，检测到 <strong>${data.total_faces}</strong> 张人脸（${modeText} / ${detectText}）`;
-      
-      document.getElementById('originalImg').src = '';
-      document.getElementById('resultImg').src = 'https://img.icons8.com/color/150/000000/archive.png'; // ZIP 占位图
-      document.getElementById('leftLabel').textContent = '批量处理结果';
-      document.getElementById('rightLabel').textContent = '已打包为 ZIP';
-      document.getElementById('downloadBtn').textContent = '⬇️ 下载 ZIP 压缩包';
-    } else {
+        infoBar.className = 'info-bar';
+        infoBar.innerHTML = `✅ 批量处理完成！共处理 <strong>${data.processed_count}</strong> 张图片，检测到 <strong>${data.total_faces}</strong> 张人脸。`;
+        
+        // 批处理时，不显示占位图片，而是显示纯文本/CSS图标的面板
+        document.getElementById('originalImg').style.display = 'none';
+        document.getElementById('resultImg').style.display = 'none';
+        
+        // 动态创建或显示纯 CSS 提示框
+        let batchInfoWrap = document.getElementById('batchInfoWrap');
+        if (!batchInfoWrap) {
+          batchInfoWrap = document.createElement('div');
+          batchInfoWrap.id = 'batchInfoWrap';
+          batchInfoWrap.style.gridColumn = '1 / -1'; // 跨满整行
+          batchInfoWrap.style.display = 'flex';
+          batchInfoWrap.style.flexDirection = 'column';
+          batchInfoWrap.style.alignItems = 'center';
+          batchInfoWrap.style.padding = '40px 20px';
+          batchInfoWrap.style.background = 'linear-gradient(135deg, #f8f9fa, #eef2f5)';
+          batchInfoWrap.style.borderRadius = '14px';
+          batchInfoWrap.style.border = '2px dashed #d0d7de';
+          
+          batchInfoWrap.innerHTML = `
+            <div style="font-size: 4rem; margin-bottom: 16px;">📦</div>
+            <h3 style="color: #444; margin-bottom: 8px;">ZIP 打包已完成</h3>
+            <p style="color: #666; font-size: 0.95rem; text-align: center;">您的多张图片已全部处理完毕，并按照原有的文件夹结构打包为了 ZIP 文件。</p>
+          `;
+          document.querySelector('.compare-wrap').appendChild(batchInfoWrap);
+        }
+        batchInfoWrap.style.display = 'flex';
+        
+        // 隐藏左右标题
+        document.getElementById('leftLabel').style.display = 'none';
+        document.getElementById('rightLabel').style.display = 'none';
+        
+        document.getElementById('downloadBtn').innerHTML = '⬇️ 下载 ZIP 压缩包';
+      } else {
       if (data.face_count === 0) {
         infoBar.className = 'info-bar warn';
         infoBar.innerHTML = '⚠️ 未检测到人脸，已返回原图。请确认图片中有清晰正面人脸。';
@@ -614,11 +826,29 @@ async function processImage() {
         infoBar.className = 'info-bar';
         infoBar.innerHTML = `✅ 检测到 <strong>${data.face_count}</strong> 张人脸，已完成 <strong>${modeText}</strong> 处理（${detectText}）`;
       }
+      
+      document.getElementById('originalImg').style.display = 'block';
+      document.getElementById('resultImg').style.display = 'block';
+      if (document.getElementById('batchInfoWrap')) {
+        document.getElementById('batchInfoWrap').style.display = 'none';
+      }
+      document.getElementById('leftLabel').style.display = 'block';
+      document.getElementById('rightLabel').style.display = 'block';
+      
       document.getElementById('originalImg').src = originalDataUrl;
       document.getElementById('resultImg').src = data.result_url + '?t=' + Date.now();
+      
+      // 恢复单张图片时的样式
+      document.getElementById('originalImg').style.objectFit = 'cover';
+      document.getElementById('resultImg').style.objectFit = 'cover';
+      document.getElementById('originalImg').style.padding = '0';
+      document.getElementById('resultImg').style.padding = '0';
+      document.getElementById('originalImg').style.background = 'transparent';
+      document.getElementById('resultImg').style.background = 'transparent';
+
       document.getElementById('leftLabel').textContent = '原图';
       document.getElementById('rightLabel').textContent = '处理后';
-      document.getElementById('downloadBtn').textContent = '⬇️ 下载处理后图片';
+      document.getElementById('downloadBtn').innerHTML = '⬇️ 下载处理后图片';
     }
 
     const filename = data.result_url.split('/').pop();
@@ -639,18 +869,33 @@ function reset() {
   originalDataUrl = null;
   document.getElementById('imageInput').value = '';
   document.getElementById('avatarInput').value = '';
-  document.getElementById('previewWrap').style.display = 'none';
+  document.getElementById('previewOriginalImg').style.display = 'none';
+  document.getElementById('previewOriginalEmpty').style.display = 'block';
+  document.getElementById('previewResultImg').style.display = 'none';
+  document.getElementById('previewResultEmpty').style.display = 'block';
+  document.getElementById('previewError').style.display = 'none';
   document.getElementById('avatarPreview').style.display = 'none';
   document.getElementById('resultSection').style.display = 'none';
   document.getElementById('processBtn').disabled = true;
-  document.getElementById('debugBtn').disabled = true;
   document.getElementById('debugLegend').style.display = 'none';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // 初始化默认模式显示
+setUiMode('simple');
 selectMode('avatar', document.querySelector('[data-mode="avatar"]'));
 selectDetectMode('single', document.querySelector('[data-detect-mode="single"]'));
+
+applyStrengthToAdvancedControls(document.getElementById('strength').value);
+document.getElementById('strength').addEventListener('input', e => {
+  applyStrengthToAdvancedControls(e.target.value);
+  schedulePreview(false);
+});
+document.getElementById('strength').addEventListener('change', e => {
+  applyStrengthToAdvancedControls(e.target.value);
+  schedulePreview(true);
+});
+isInitializing = false;
 </script>
 </body>
 </html>

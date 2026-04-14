@@ -9,8 +9,8 @@ import cv2
 import numpy as np
 import zipfile
 import io
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
-from face_processor import process_image, detect_faces, _detect_yunet, _detect_haar
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, Response
+from face_processor import process_image, process_preview, detect_faces, _detect_yunet, _detect_haar
 
 def get_resource_path(relative_path):
     """获取资源绝对路径，兼容 PyInstaller 的 _MEIPASS"""
@@ -23,7 +23,10 @@ app = Flask(__name__,
             template_folder=get_resource_path("templates"))
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB
 
-USER_DATA_DIR = os.path.expanduser("~/.photo_privacy")
+if getattr(sys, 'frozen', False):
+    USER_DATA_DIR = os.path.expanduser("~/Downloads/PhotoPrivacyData")
+else:
+    USER_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_data")
 UPLOAD_FOLDER = os.path.join(USER_DATA_DIR, "uploads")
 RESULT_FOLDER = os.path.join(USER_DATA_DIR, "results")
 AVATAR_FOLDER = os.path.join(USER_DATA_DIR, "avatars")
@@ -31,10 +34,62 @@ AVATAR_FOLDER = os.path.join(USER_DATA_DIR, "avatars")
 for folder in [UPLOAD_FOLDER, RESULT_FOLDER, AVATAR_FOLDER]:
     os.makedirs(folder, exist_ok=True)
 
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "bmp"}
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "bmp", "zip"}
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+_BATCH_UPLOAD_INDEX_PATH = os.path.join(UPLOAD_FOLDER, "batch_upload_index.json")
+_batch_upload_index_cache = None
+
+def _load_batch_upload_index():
+    global _batch_upload_index_cache
+    if _batch_upload_index_cache is not None:
+        return _batch_upload_index_cache
+    if not os.path.exists(_BATCH_UPLOAD_INDEX_PATH):
+        _batch_upload_index_cache = {}
+        return _batch_upload_index_cache
+    try:
+        with open(_BATCH_UPLOAD_INDEX_PATH, "r", encoding="utf-8") as f:
+            _batch_upload_index_cache = json.load(f)
+        if not isinstance(_batch_upload_index_cache, dict):
+            _batch_upload_index_cache = {}
+    except Exception:
+        _batch_upload_index_cache = {}
+    return _batch_upload_index_cache
+
+def _save_batch_upload_index(index):
+    global _batch_upload_index_cache
+    os.makedirs(os.path.dirname(_BATCH_UPLOAD_INDEX_PATH), exist_ok=True)
+    tmp_path = _BATCH_UPLOAD_INDEX_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False)
+    os.replace(tmp_path, _BATCH_UPLOAD_INDEX_PATH)
+    _batch_upload_index_cache = index
+
+def _is_valid_zip_member_name(name):
+    if not name:
+        return False
+    name = name.replace("\\", "/")
+    parts = name.split("/")
+    if any(p == "" for p in parts):
+        return False
+    if any(p.startswith(".") or p == "__MACOSX" for p in parts):
+        return False
+    return True
+
+def _iter_zip_image_filenames(z):
+    for info in z.infolist():
+        if info.is_dir():
+            continue
+        filename = info.filename.replace("\\", "/")
+        if not _is_valid_zip_member_name(filename):
+            continue
+        if "." not in filename:
+            continue
+        ext = filename.rsplit(".", 1)[1].lower()
+        if ext in {"jpg", "jpeg", "png", "webp", "bmp"}:
+            yield filename
 
 
 @app.route("/")
@@ -72,6 +127,12 @@ def process():
         av_filename = f"{uuid.uuid4().hex}.{av_ext}"
         avatar_path = os.path.join(AVATAR_FOLDER, av_filename)
         av_file.save(avatar_path)
+        
+    builtin_avatar = request.form.get("builtin_avatar")
+    if not avatar_path and builtin_avatar:
+        builtin_path = os.path.join(get_resource_path("static"), "avatars", "built-in", builtin_avatar)
+        if os.path.exists(builtin_path):
+            avatar_path = builtin_path
 
     try:
         result_bytes, face_count = process_image(
@@ -83,6 +144,8 @@ def process():
             global_blur_strength=global_blur_strength
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
     # 保存结果
@@ -98,6 +161,170 @@ def process():
         "mode": mode,
         "detect_mode": detect_mode,
     })
+
+
+@app.route("/preview", methods=["POST"])
+def preview():
+    image_bytes = None
+    if "image" in request.files and request.files["image"].filename:
+        image_bytes = request.files["image"].read()
+    else:
+        sample_id = request.form.get("sample_id", "default")
+        sample_path = os.path.join(get_resource_path("static"), "samples", f"{sample_id}.jpg")
+        if os.path.exists(sample_path):
+            with open(sample_path, "rb") as f:
+                image_bytes = f.read()
+
+    if not image_bytes:
+        return jsonify({"success": False, "error": "未提供图片"}), 400
+
+    strength = request.form.get("strength", "40")
+    mode = request.form.get("mode", "blur")
+    is_smart_batch = request.form.get("is_smart_batch") == "true"
+    rule_single = request.form.get("rule_single", "blur")
+    rule_multi = request.form.get("rule_multi", "blur_faces")
+    safety_level = request.form.get("safety_level")
+
+    avatar_path = None
+    avatar_bytes = None
+    if "avatar" in request.files and request.files["avatar"].filename:
+        avatar_bytes = request.files["avatar"].read()
+
+    builtin_avatar = request.form.get("builtin_avatar")
+    if not avatar_bytes and builtin_avatar:
+        builtin_path = os.path.join(get_resource_path("static"), "avatars", "built-in", builtin_avatar)
+        if os.path.exists(builtin_path):
+            avatar_path = builtin_path
+
+    try:
+        result_bytes, _ = process_preview(
+            image_bytes,
+            strength=strength,
+            mode=mode,
+            avatar_path=avatar_path,
+            avatar_bytes=avatar_bytes,
+            is_smart_batch=is_smart_batch,
+            rule_single=rule_single,
+            rule_multi=rule_multi,
+            safety_level=safety_level,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return Response(result_bytes, mimetype="image/jpeg")
+
+
+@app.route("/batch_prepare", methods=["POST"])
+def batch_prepare():
+    zip_file = None
+    if "zip" in request.files and request.files["zip"].filename:
+        zip_file = request.files["zip"]
+    elif "file" in request.files and request.files["file"].filename:
+        zip_file = request.files["file"]
+    elif "images" in request.files:
+        for f in request.files.getlist("images"):
+            if f and f.filename and f.filename.lower().endswith(".zip"):
+                zip_file = f
+                break
+
+    if not zip_file or not zip_file.filename:
+        return jsonify({"success": False, "error": "未上传 ZIP"}), 400
+    if not allowed_file(zip_file.filename) or not zip_file.filename.lower().endswith(".zip"):
+        return jsonify({"success": False, "error": "不支持的文件格式"}), 400
+
+    upload_id = uuid.uuid4().hex
+    zip_filename = f"upload_{upload_id}.zip"
+    zip_path = os.path.join(UPLOAD_FOLDER, zip_filename)
+    zip_file.save(zip_path)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            samples = []
+            for name in _iter_zip_image_filenames(z):
+                samples.append(name)
+                if len(samples) >= 5:
+                    break
+    except Exception as e:
+        try:
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+        except Exception:
+            pass
+        return jsonify({"success": False, "error": f"ZIP 读取失败: {e}"}), 400
+
+    index = _load_batch_upload_index()
+    index[upload_id] = zip_filename
+    _save_batch_upload_index(index)
+
+    return jsonify({"success": True, "upload_id": upload_id, "samples": samples})
+
+
+@app.route("/batch_preview_image", methods=["POST"])
+def batch_preview_image():
+    upload_id = request.form.get("upload_id")
+    filename = request.form.get("filename")
+    if not upload_id or not filename:
+        return jsonify({"success": False, "error": "缺少 upload_id 或 filename"}), 400
+
+    index = _load_batch_upload_index()
+    zip_filename = index.get(upload_id)
+    if not zip_filename:
+        return jsonify({"success": False, "error": "upload_id 不存在或已过期"}), 404
+
+    zip_path = os.path.join(UPLOAD_FOLDER, zip_filename)
+    if not os.path.exists(zip_path):
+        return jsonify({"success": False, "error": "ZIP 文件不存在"}), 404
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            try:
+                info = z.getinfo(filename)
+            except KeyError:
+                return jsonify({"success": False, "error": "文件不存在"}), 404
+            if info.is_dir():
+                return jsonify({"success": False, "error": "目标是目录"}), 400
+            image_bytes = z.read(info.filename)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"ZIP 读取失败: {e}"}), 400
+
+    strength = request.form.get("strength", "40")
+    mode = request.form.get("mode", "blur")
+    is_smart_batch = request.form.get("is_smart_batch") == "true"
+    rule_single = request.form.get("rule_single", "blur")
+    rule_multi = request.form.get("rule_multi", "blur_faces")
+    safety_level = request.form.get("safety_level")
+
+    avatar_path = None
+    avatar_bytes = None
+    if "avatar" in request.files and request.files["avatar"].filename:
+        avatar_bytes = request.files["avatar"].read()
+
+    builtin_avatar = request.form.get("builtin_avatar")
+    if not avatar_bytes and builtin_avatar:
+        builtin_path = os.path.join(get_resource_path("static"), "avatars", "built-in", builtin_avatar)
+        if os.path.exists(builtin_path):
+            avatar_path = builtin_path
+
+    try:
+        result_bytes, _ = process_preview(
+            image_bytes,
+            strength=strength,
+            mode=mode,
+            avatar_path=avatar_path,
+            avatar_bytes=avatar_bytes,
+            is_smart_batch=is_smart_batch,
+            rule_single=rule_single,
+            rule_multi=rule_multi,
+            safety_level=safety_level,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return Response(result_bytes, mimetype="image/jpeg")
 
 
 @app.route("/batch_process", methods=["POST"])
@@ -126,6 +353,12 @@ def batch_process():
         av_filename = f"{uuid.uuid4().hex}.{av_ext}"
         avatar_path = os.path.join(AVATAR_FOLDER, av_filename)
         av_file.save(avatar_path)
+        
+    builtin_avatar = request.form.get("builtin_avatar")
+    if not avatar_path and builtin_avatar:
+        builtin_path = os.path.join(get_resource_path("static"), "avatars", "built-in", builtin_avatar)
+        if os.path.exists(builtin_path):
+            avatar_path = builtin_path
 
     zip_filename = f"batch_{uuid.uuid4().hex}.zip"
     zip_path = os.path.join(RESULT_FOLDER, zip_filename)
@@ -148,16 +381,21 @@ def batch_process():
                 with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as z:
                     for zip_info in z.infolist():
                         # 忽略目录和隐藏文件（如 macOS 的 __MACOSX 目录）
-                        if zip_info.is_dir() or zip_info.filename.startswith('__MACOSX') or zip_info.filename.startswith('.'):
+                        if zip_info.is_dir():
                             continue
+                        
+                        # 检查路径中是否包含 __MACOSX 或任何隐藏文件/文件夹
+                        path_parts = zip_info.filename.replace('\\', '/').split('/')
+                        if any(p.startswith('.') or p == '__MACOSX' for p in path_parts):
+                            continue
+                        
                         # 检查扩展名是否为允许的图片
                         if "." in zip_info.filename:
                             inner_ext = zip_info.filename.rsplit(".", 1)[1].lower()
                             if inner_ext in {"jpg", "jpeg", "png", "webp", "bmp"}:
                                 img_bytes = z.read(zip_info.filename)
-                                # 提取纯文件名，忽略在 zip 中的路径
-                                base_name = os.path.basename(zip_info.filename)
-                                images_to_process.append((base_name, img_bytes))
+                                # 完整保留在 ZIP 中的相对路径
+                                images_to_process.append((zip_info.filename, img_bytes))
             else:
                 # 处理普通图片文件
                 images_to_process.append((file.filename, file.read()))
@@ -165,25 +403,34 @@ def batch_process():
         if not images_to_process:
             return jsonify({"success": False, "error": "未在上传的文件或 ZIP 中找到有效的图片"}), 400
 
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for filename, image_bytes in images_to_process:
-                result_bytes, face_count = process_image(
-                    image_bytes,
-                    mode=mode,
-                    detect_mode=detect_mode,
-                    blur_strength=blur_strength,
-                    avatar_path=avatar_path,
-                    global_blur_strength=global_blur_strength,
-                    is_smart_batch=is_smart_batch,
-                    rule_single=rule_single,
-                    rule_multi=rule_multi
-                )
-                total_faces += face_count
-                processed_count += 1
-                # 避免同名文件覆盖，加上 uuid
-                safe_name = f"{uuid.uuid4().hex[:6]}_{filename}"
-                zipf.writestr(safe_name, result_bytes)
+                try:
+                    result_bytes, face_count = process_image(
+                        image_bytes,
+                        mode=mode,
+                        detect_mode=detect_mode,
+                        blur_strength=blur_strength,
+                        avatar_path=avatar_path,
+                        global_blur_strength=global_blur_strength,
+                        is_smart_batch=is_smart_batch,
+                        rule_single=rule_single,
+                        rule_multi=rule_multi
+                    )
+                    total_faces += face_count
+                    processed_count += 1
+                    # 拆分目录和文件名，只在文件名加上 uuid，以保留原有的目录结构
+                    dir_name, base_name = os.path.split(filename)
+                    safe_base_name = f"{uuid.uuid4().hex[:6]}_{base_name}"
+                    safe_path = os.path.join(dir_name, safe_base_name).replace("\\", "/") if dir_name else safe_base_name
+                    
+                    zipf.writestr(safe_path, result_bytes)
+                except Exception as e:
+                    print(f"Skipping {filename} due to error: {e}")
+                    continue
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
     return jsonify({
@@ -194,51 +441,6 @@ def batch_process():
         "mode": mode,
         "detect_mode": detect_mode,
     })
-
-@app.route("/debug_boxes", methods=["POST"])
-def debug_boxes():
-    """返回叠加了人脸检测框的调试图（绿=YuNet, 橙=Haar, 红=最终）"""
-    if "image" not in request.files:
-        return jsonify({"success": False, "error": "未上传图片"}), 400
-    file = request.files["image"]
-    if not file.filename or not allowed_file(file.filename):
-        return jsonify({"success": False, "error": "不支持的格式"}), 400
-
-    nparr = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        return jsonify({"success": False, "error": "无法读取图片"}), 400
-
-    mode = request.form.get("mode", "blur")
-    detect_mode = request.form.get("detect_mode")
-    yunet = _detect_yunet(img, conf_thr=0.5)
-    haar = _detect_haar(img)
-    final = detect_faces(img, mode=mode, detect_mode=detect_mode)
-
-    vis = img.copy()
-    for (x, y, w, h) in yunet:
-        cv2.rectangle(vis, (x, y), (x+w, y+h), (0, 200, 0), 2)
-    for (x, y, w, h) in haar:
-        cv2.rectangle(vis, (x, y), (x+w, y+h), (0, 140, 255), 1)
-    for i, (x, y, w, h) in enumerate(final):
-        cv2.rectangle(vis, (x, y), (x+w, y+h), (0, 0, 220), 2)
-        cv2.putText(vis, str(i+1), (x+4, y+22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 220), 2)
-
-    _, buf = cv2.imencode(".jpg", vis, [cv2.IMWRITE_JPEG_QUALITY, 92])
-    dbg_filename = f"debug_{uuid.uuid4().hex}.jpg"
-    dbg_path = os.path.join(RESULT_FOLDER, dbg_filename)
-    with open(dbg_path, "wb") as f:
-        f.write(buf.tobytes())
-
-    return jsonify({
-        "success": True,
-        "yunet_count": len(yunet),
-        "haar_count":  len(haar),
-        "final_count": len(final),
-        "debug_url":   f"/user_data/results/{dbg_filename}",
-    })
-
 
 @app.route("/download/<filename>")
 def download(filename):

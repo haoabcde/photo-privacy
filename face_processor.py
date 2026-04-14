@@ -7,9 +7,52 @@
 """
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
+import io
 import os
 import sys
+
+def correct_image_orientation(image_bytes):
+    """读取图片字节流，使用 PIL 修正 EXIF 旋转，并转为 BGR 的 numpy 数组供 cv2 使用"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)
+        img = img.convert('RGB')
+        # Convert RGB to BGR for OpenCV
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        # Fallback to direct cv2 decode if PIL fails
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+def _resize_for_preview(image_bgr, max_side=900):
+    h, w = image_bgr.shape[:2]
+    m = max(h, w)
+    if m <= max_side:
+        return image_bgr
+    scale = max_side / float(m)
+    nw, nh = int(w * scale), int(h * scale)
+    if nw < 1 or nh < 1:
+        return image_bgr
+    return cv2.resize(image_bgr, (nw, nh))
+
+def _map_strength(strength):
+    try:
+        s = int(float(strength))
+    except Exception:
+        s = 40
+    s = max(0, min(s, 100))
+    blur_strength = int(15 + (s / 100.0) * 40)
+    global_blur_strength = int(max(0, s - 40) * 1)
+    return blur_strength, global_blur_strength
+
+def _encode_jpeg(image_bgr, quality=92):
+    q = int(quality)
+    q = max(10, min(q, 100))
+    ok, buf = cv2.imencode(".jpg", image_bgr, [cv2.IMWRITE_JPEG_QUALITY, q])
+    if not ok:
+        raise ValueError("JPEG 编码失败")
+    return buf.tobytes()
 
 def get_resource_path(relative_path):
     """获取资源绝对路径，兼容 PyInstaller 的 _MEIPASS"""
@@ -156,13 +199,6 @@ def _select_primary_face(boxes, image_shape):
     return [max(boxes, key=score)]
 
 
-def _resolve_detect_mode(mode, detect_mode=None):
-    """兼容旧调用：未显式指定时，头像=单人，模糊=多人。"""
-    if detect_mode in ("single", "multi"):
-        return detect_mode
-    return "single" if mode == "avatar" else "multi"
-
-
 def detect_single_face(image_bgr, yunet_boxes, strict=False):
     if strict:
         boxes = yunet_boxes
@@ -186,13 +222,12 @@ def detect_multi_faces(image_bgr, yunet_boxes, strict=False):
 
 
 # ─── 主检测入口 ───────────────────────────────────────────────
-def detect_faces(image_bgr, mode="blur", detect_mode=None,
+def detect_faces(image_bgr, mode="blur", detect_mode="multi",
                  pad_ratio_x=0.12, pad_ratio_top=0.28, pad_ratio_bot=0.10, strict=False):
     """
     多级人脸检测：
     - strict=True：仅使用 YuNet 并提高置信度阈值，禁用 Haar 兜底，防止批处理风景图误识别
     """
-    detect_mode = _resolve_detect_mode(mode, detect_mode)
     h_img, w_img = image_bgr.shape[:2]
     
     conf_thr = 0.65 if strict else 0.55
@@ -269,13 +304,23 @@ def generate_cartoon_avatar(size, index=0):
 
 
 # ─── 功能 1：卡通头像替换 ─────────────────────────────────────
-def apply_cartoon_avatar(image_bgr, faces, avatar_path=None):
+def apply_cartoon_avatar(image_bgr, faces, avatar_path=None, avatar_bytes=None):
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGBA))
     for i, (x, y, w, h) in enumerate(faces):
+        avatar = None
+        if avatar_bytes:
+            try:
+                avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+            except Exception:
+                avatar = None
         if avatar_path and os.path.exists(avatar_path):
-            avatar = Image.open(avatar_path).convert("RGBA").resize((w, h), Image.LANCZOS)
-        else:
-            avatar = generate_cartoon_avatar(max(w, h), index=i).resize((w, h), Image.LANCZOS)
+            try:
+                avatar = Image.open(avatar_path).convert("RGBA")
+            except Exception:
+                avatar = None
+        if avatar is None:
+            avatar = generate_cartoon_avatar(max(w, h), index=i)
+        avatar = avatar.resize((w, h), Image.LANCZOS)
         px = x + (w - avatar.width) // 2
         py = y + (h - avatar.height) // 2
         pil_img.paste(avatar, (px, py), avatar)
@@ -329,9 +374,8 @@ def apply_face_blur(image_bgr, faces, blur_strength=55):
 
 # ─── 主处理入口 ───────────────────────────────────────────────
 def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None, global_blur_strength=0, 
-                  is_smart_batch=False, rule_single="blur", rule_multi="blur_faces"):
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                  is_smart_batch=False, rule_single="blur", rule_multi="blur_faces", avatar_bytes=None, jpeg_quality_override=None):
+    image_bgr = correct_image_orientation(image_bytes)
     if image_bgr is None:
         raise ValueError("无法读取图片")
 
@@ -349,21 +393,20 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
                 return image_bytes, 1
             # 若不是 keep，再用 single 策略精准定位那一张脸
             faces = detect_faces(image_bgr, mode="blur", detect_mode="single", strict=is_smart_batch)
-            output = apply_cartoon_avatar(image_bgr, faces, avatar_path) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
         else: # face_count >= 2
             if rule_multi == "global_blur_only":
                 output = image_bgr.copy() # 不模糊人脸，仅走下方全局模糊
             else: # rule_multi == "blur_faces"
                 output = apply_face_blur(image_bgr, faces, blur_strength)
     else:
-        # 单张精修逻辑（旧有逻辑）
-        detect_mode = _resolve_detect_mode(mode, detect_mode)
-        faces = detect_faces(image_bgr, mode=mode, detect_mode=detect_mode, strict=False)
+        # 单张精修逻辑：直接全量检测所有面部，统一处理
+        faces = detect_faces(image_bgr, mode=mode, detect_mode="multi", strict=False)
         face_count = len(faces)
         if face_count == 0:
             output = image_bgr.copy()
         else:
-            output = apply_cartoon_avatar(image_bgr, faces, avatar_path) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
 
     # === 全局融合与老照片感处理 ===
     jpeg_quality = 95
@@ -375,5 +418,61 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
             output = cv2.GaussianBlur(output, (k_size, k_size), sigma)
         jpeg_quality = max(35, 95 - int(global_blur_strength * 0.6))
 
-    _, buf = cv2.imencode(".jpg", output, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-    return buf.tobytes(), face_count
+    if jpeg_quality_override is not None:
+        try:
+            jpeg_quality = int(float(jpeg_quality_override))
+        except Exception:
+            jpeg_quality = 92
+        jpeg_quality = max(10, min(jpeg_quality, 100))
+
+    return _encode_jpeg(output, quality=jpeg_quality), face_count
+
+
+def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, avatar_bytes=None, is_smart_batch=False,
+                    rule_single="blur", rule_multi="blur_faces", safety_level=None):
+    image_bgr = correct_image_orientation(image_bytes)
+    if image_bgr is None:
+        raise ValueError("无法读取图片")
+
+    image_bgr = _resize_for_preview(image_bgr, max_side=900)
+    blur_strength, global_blur_strength = _map_strength(strength)
+
+    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
+    face_count = len(faces)
+
+    if is_smart_batch:
+        if face_count == 0:
+            output = image_bgr.copy()
+        elif face_count == 1:
+            if rule_single == "keep":
+                output = image_bgr.copy()
+            else:
+                faces = detect_faces(image_bgr, mode="blur", detect_mode="single", strict=is_smart_batch)
+                if rule_single == "avatar":
+                    output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
+                else:
+                    output = apply_face_blur(image_bgr, faces, blur_strength)
+        else:
+            if rule_multi == "global_blur_only":
+                output = image_bgr.copy()
+            else:
+                output = apply_face_blur(image_bgr, faces, blur_strength)
+    else:
+        faces = detect_faces(image_bgr, mode=mode, detect_mode="multi", strict=False)
+        face_count = len(faces)
+        if face_count == 0:
+            output = image_bgr.copy()
+        else:
+            if mode == "avatar":
+                output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
+            else:
+                output = apply_face_blur(image_bgr, faces, blur_strength)
+
+    if global_blur_strength > 0:
+        sigma = global_blur_strength / 20.0
+        k_size = int(sigma * 2) | 1
+        k_size = min(k_size, 7)
+        if k_size >= 3:
+            output = cv2.GaussianBlur(output, (k_size, k_size), sigma)
+
+    return _encode_jpeg(output, quality=90), face_count
