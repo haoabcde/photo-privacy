@@ -99,9 +99,6 @@ temp*/
 *.png
 *.jpg
 !static/samples/default.jpg
-!example/*.jpg
-!example/*.png
-!example/*.webp
 test_*.py
 tests_*.py
 page.html
