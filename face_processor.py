@@ -97,8 +97,22 @@ def _nms(boxes, iou_thr=0.35):
     if not boxes:
         return []
     
-    # 将 list of tuples 转换为 float 类型的 numpy 数组，加速计算
-    boxes_np = np.array(boxes, dtype=np.float32)
+    # 为了避免各类数据类型造成的异常，统一转为普通的元组列表
+    try:
+        clean_boxes = []
+        for b in boxes:
+            if hasattr(b, '__len__') and len(b) >= 4:
+                clean_boxes.append((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
+        if not clean_boxes:
+            return []
+            
+        boxes_np = np.array(clean_boxes, dtype=np.float32)
+        if len(boxes_np.shape) != 2 or boxes_np.shape[1] < 4:
+            raise ValueError("Invalid boxes shape")
+    except Exception:
+        # 兜底：返回原始框的前几个（避免崩溃）
+        return list(boxes)[:10]
+        
     x1 = boxes_np[:, 0]
     y1 = boxes_np[:, 1]
     w = boxes_np[:, 2]
@@ -110,9 +124,13 @@ def _nms(boxes, iou_thr=0.35):
     order = areas.argsort()[::-1]  # 按面积从大到小排序
     
     keep = []
+    
+    # 修复：确保 boxes 可以按原索引访问，即使它是 generator 或其他类型
+    boxes_list = list(boxes)
+    
     while order.size > 0:
         i = order[0]
-        keep.append(boxes[i])
+        keep.append(boxes_list[i])
         
         if order.size == 1:
             break
@@ -161,16 +179,19 @@ def _detect_yunet(image_bgr, conf_thr=0.6):
         if faces is None:
             continue
         for face in faces:
-            x = int(face[0] / scale)
-            y = int(face[1] / scale)
-            fw = int(face[2] / scale)
-            fh = int(face[3] / scale)
-            # 边界检查
-            x, y = max(0, x), max(0, y)
-            fw = min(fw, w - x)
-            fh = min(fh, h - y)
-            if fw > 8 and fh > 8:
-                results.append((x, y, fw, fh))
+            try:
+                x = int(face[0] / scale)
+                y = int(face[1] / scale)
+                fw = int(face[2] / scale)
+                fh = int(face[3] / scale)
+                # 边界检查
+                x, y = max(0, x), max(0, y)
+                fw = min(fw, w - x)
+                fh = min(fh, h - y)
+                if fw > 8 and fh > 8:
+                    results.append((x, y, fw, fh))
+            except Exception:
+                continue
 
     return results
 
@@ -178,34 +199,37 @@ def _detect_yunet(image_bgr, conf_thr=0.6):
 # ─── Haar 兜底检测 ────────────────────────────────────────────
 def _detect_haar(image_bgr):
     _init_haar()
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.equalizeHist(gray)
-    h, w = image_bgr.shape[:2]
-    min_sz = max(20, int(min(h, w) * 0.04))
-    boxes = []
+    try:
+        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
+        h, w = image_bgr.shape[:2]
+        min_sz = max(20, int(min(h, w) * 0.04))
+        boxes = []
 
-    for cascade, nbr in [(_haar_default, 4), (_haar_alt2, 3)]:
-        rects = cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=nbr,
-            minSize=(min_sz, min_sz), flags=cv2.CASCADE_SCALE_IMAGE
-        )
-        if len(rects) > 0:
-            for r in rects:
-                boxes.append(tuple(int(v) for v in r))
+        for cascade, nbr in [(_haar_default, 4), (_haar_alt2, 3)]:
+            rects = cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=nbr,
+                minSize=(min_sz, min_sz), flags=cv2.CASCADE_SCALE_IMAGE
+            )
+            if len(rects) > 0:
+                for r in rects:
+                    boxes.append(tuple(int(v) for v in r))
 
-    # 侧脸 + 镜像侧脸
-    for flip in [False, True]:
-        g = cv2.flip(gray, 1) if flip else gray
-        rects = _haar_profile.detectMultiScale(
-            g, scaleFactor=1.1, minNeighbors=3,
-            minSize=(min_sz, min_sz), flags=cv2.CASCADE_SCALE_IMAGE
-        )
-        if len(rects) > 0:
-            for (x, y, fw, fh) in rects:
-                if flip:
-                    x = w - x - fw
-                boxes.append((int(x), int(y), int(fw), int(fh)))
-    return boxes
+        # 侧脸 + 镜像侧脸
+        for flip in [False, True]:
+            g = cv2.flip(gray, 1) if flip else gray
+            rects = _haar_profile.detectMultiScale(
+                g, scaleFactor=1.1, minNeighbors=3,
+                minSize=(min_sz, min_sz), flags=cv2.CASCADE_SCALE_IMAGE
+            )
+            if len(rects) > 0:
+                for (x, y, fw, fh) in rects:
+                    if flip:
+                        x = w - x - fw
+                    boxes.append((int(x), int(y), int(fw), int(fh)))
+        return boxes
+    except Exception:
+        return []
 
 
 def _select_primary_face(boxes, image_shape):
@@ -235,21 +259,26 @@ def _select_primary_face(boxes, image_shape):
 
 def detect_single_face(image_bgr, yunet_boxes, strict=False):
     if strict:
-        boxes = yunet_boxes
+        boxes = list(yunet_boxes)
     else:
-        boxes = yunet_boxes if yunet_boxes else _nms(_detect_haar(image_bgr), iou_thr=0.3)
+        if len(yunet_boxes) > 0:
+            boxes = list(yunet_boxes)
+        else:
+            boxes = _nms(list(_detect_haar(image_bgr)), iou_thr=0.3)
     return _select_primary_face(boxes, image_bgr.shape)
 
 
 def detect_multi_faces(image_bgr, yunet_boxes, strict=False):
     if strict:
-        return yunet_boxes
+        return list(yunet_boxes)
         
-    boxes = yunet_boxes
+    boxes = list(yunet_boxes)
     if len(boxes) == 0:
-        boxes = _detect_haar(image_bgr)
+        boxes = _nms(list(_detect_haar(image_bgr)), iou_thr=0.3)
     elif len(boxes) < 5:
-        boxes = _nms(boxes + _detect_haar(image_bgr), iou_thr=0.3)
+        haar_res = list(_detect_haar(image_bgr))
+        combined = boxes + haar_res
+        boxes = _nms(combined, iou_thr=0.3)
     else:
         boxes = _nms(boxes, iou_thr=0.3)
     return boxes
@@ -346,6 +375,9 @@ def generate_cartoon_avatar(size, index=0):
 
 # ─── 功能 1：卡通头像替换 ─────────────────────────────────────
 def apply_cartoon_avatar(image_bgr, faces, avatar_path=None, avatar_bytes=None):
+    if not faces:
+        return image_bgr
+        
     pil_img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGBA))
     for i, (x, y, w, h) in enumerate(faces):
         avatar = None
@@ -354,7 +386,7 @@ def apply_cartoon_avatar(image_bgr, faces, avatar_path=None, avatar_bytes=None):
                 avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
             except Exception:
                 avatar = None
-        if avatar_path and os.path.exists(avatar_path):
+        if avatar is None and avatar_path and os.path.exists(avatar_path):
             try:
                 avatar = Image.open(avatar_path).convert("RGBA")
             except Exception:
@@ -440,7 +472,10 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
                 return image_bytes, 1
             # 若不是 keep，再用 single 策略精准定位那一张脸
             faces = detect_faces(image_bgr, mode="blur", detect_mode="single", strict=is_smart_batch)
-            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if rule_single == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+            if rule_single == "avatar":
+                output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
+            else:
+                output = apply_face_blur(image_bgr, faces, blur_strength)
         else: # face_count >= 2
             if rule_multi == "global_blur_only":
                 output = image_bgr # 不模糊人脸，仅走下方全局模糊
@@ -451,7 +486,10 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
         if face_count == 0:
             output = image_bgr
         else:
-            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+            if mode == "avatar":
+                output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
+            else:
+                output = apply_face_blur(image_bgr, faces, blur_strength)
 
     # === 全局融合与老照片感处理 ===
     jpeg_quality = 95
@@ -484,6 +522,7 @@ def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, ava
 
     faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
     face_count = len(faces)
+    output = image_bgr
 
     if is_smart_batch:
         if face_count == 0:
@@ -506,7 +545,10 @@ def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, ava
         if face_count == 0:
             output = image_bgr
         else:
-            output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes) if mode == "avatar" else apply_face_blur(image_bgr, faces, blur_strength)
+            if mode == "avatar":
+                output = apply_cartoon_avatar(image_bgr, faces, avatar_path, avatar_bytes)
+            else:
+                output = apply_face_blur(image_bgr, faces, blur_strength)
 
     if global_blur_strength > 0:
         sigma = global_blur_strength / 20.0

@@ -21,7 +21,7 @@ def get_resource_path(relative_path):
 app = Flask(__name__,
             static_folder=get_resource_path("static"),
             template_folder=get_resource_path("templates"))
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024 * 1024  # 10GB
 
 if getattr(sys, 'frozen', False):
     USER_DATA_DIR = os.path.expanduser("~/Downloads/PhotoPrivacyData")
@@ -38,6 +38,21 @@ ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "bmp", "zip"}
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def _sanitize_download_name(name, fallback, ext_hint=None):
+    if not name:
+        return fallback
+    name = str(name)
+    name = name.replace("\x00", "").replace("\r", "").replace("\n", "")
+    name = name.replace("/", "_").replace("\\", "_").replace(":", "_")
+    name = name.strip()
+    if not name:
+        return fallback
+    if ext_hint and "." not in name:
+        name = f"{name}.{ext_hint}"
+    if len(name) > 180:
+        name = name[-180:]
+    return name
 
 _BATCH_UPLOAD_INDEX_PATH = os.path.join(UPLOAD_FOLDER, "batch_upload_index.json")
 _batch_upload_index_cache = None
@@ -78,18 +93,32 @@ def _is_valid_zip_member_name(name):
         return False
     return True
 
+def _decode_zip_filename(info):
+    if info.flag_bits & 0x800:
+        return info.filename
+    else:
+        try:
+            # 还原为字节流再尝试用 GBK（中文 Windows 默认）或 UTF-8 解码
+            b = info.filename.encode('cp437')
+            try:
+                return b.decode('gbk')
+            except UnicodeDecodeError:
+                return b.decode('utf-8')
+        except Exception:
+            return info.filename
+
 def _iter_zip_image_filenames(z):
     for info in z.infolist():
         if info.is_dir():
             continue
-        filename = info.filename.replace("\\", "/")
+        filename = _decode_zip_filename(info).replace("\\", "/")
         if not _is_valid_zip_member_name(filename):
             continue
         if "." not in filename:
             continue
         ext = filename.rsplit(".", 1)[1].lower()
         if ext in {"jpg", "jpeg", "png", "webp", "bmp"}:
-            yield filename
+            yield filename, info
 
 
 @app.route("/")
@@ -215,7 +244,6 @@ def preview():
 
     return Response(result_bytes, mimetype="image/jpeg")
 
-
 @app.route("/batch_prepare", methods=["POST"])
 def batch_prepare():
     zip_file = None
@@ -242,8 +270,9 @@ def batch_prepare():
     try:
         with zipfile.ZipFile(zip_path, "r") as z:
             samples = []
-            for name in _iter_zip_image_filenames(z):
-                samples.append(name)
+            for name, info in _iter_zip_image_filenames(z):
+                # 仍然向前端发送内部真实路径，以便后续 getinfo() 能获取到
+                samples.append(info.filename)
                 if len(samples) >= 5:
                     break
     except Exception as e:
@@ -368,6 +397,7 @@ def batch_process():
 
     # 提取所有待处理的图片 (filename, image_bytes)
     images_to_process = []
+    download_name = None
     
     try:
         for file in files:
@@ -376,6 +406,8 @@ def batch_process():
                 
             ext = file.filename.rsplit(".", 1)[1].lower()
             if ext == "zip":
+                if download_name is None:
+                    download_name = file.filename
                 # 处理上传的 zip 文件
                 file_bytes = file.read()
                 with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as z:
@@ -385,17 +417,18 @@ def batch_process():
                             continue
                         
                         # 检查路径中是否包含 __MACOSX 或任何隐藏文件/文件夹
-                        path_parts = zip_info.filename.replace('\\', '/').split('/')
+                        decoded_name = _decode_zip_filename(zip_info)
+                        path_parts = decoded_name.replace('\\', '/').split('/')
                         if any(p.startswith('.') or p == '__MACOSX' for p in path_parts):
                             continue
                         
                         # 检查扩展名是否为允许的图片
-                        if "." in zip_info.filename:
-                            inner_ext = zip_info.filename.rsplit(".", 1)[1].lower()
+                        if "." in decoded_name:
+                            inner_ext = decoded_name.rsplit(".", 1)[1].lower()
                             if inner_ext in {"jpg", "jpeg", "png", "webp", "bmp"}:
                                 img_bytes = z.read(zip_info.filename)
-                                # 完整保留在 ZIP 中的相对路径
-                                images_to_process.append((zip_info.filename, img_bytes))
+                                # 完整保留在 ZIP 中的相对路径，使用解码后的名称以防乱码
+                                images_to_process.append((decoded_name, img_bytes))
             else:
                 # 处理普通图片文件
                 images_to_process.append((file.filename, file.read()))
@@ -415,7 +448,9 @@ def batch_process():
                         global_blur_strength=global_blur_strength,
                         is_smart_batch=is_smart_batch,
                         rule_single=rule_single,
-                        rule_multi=rule_multi
+                        rule_multi=rule_multi,
+                        avatar_bytes=None,
+                        jpeg_quality_override=None
                     )
                     total_faces += face_count
                     processed_count += 1
@@ -424,7 +459,13 @@ def batch_process():
                     safe_base_name = f"{uuid.uuid4().hex[:6]}_{base_name}"
                     safe_path = os.path.join(dir_name, safe_base_name).replace("\\", "/") if dir_name else safe_base_name
                     
-                    zipf.writestr(safe_path, result_bytes)
+                    import time
+                    zinfo = zipfile.ZipInfo(safe_path, date_time=time.localtime()[:6])
+                    zinfo.compress_type = zipfile.ZIP_DEFLATED
+                    # 强制使用 UTF-8 编码，兼容所有系统解压
+                    zinfo.flag_bits |= 0x800
+                    
+                    zipf.writestr(zinfo, result_bytes)
                 except Exception as e:
                     print(f"Skipping {filename} due to error: {e}")
                     continue
@@ -438,6 +479,7 @@ def batch_process():
         "processed_count": processed_count,
         "total_faces": total_faces,
         "result_url": f"/user_data/results/{zip_filename}",
+        "download_name": download_name or zip_filename,
         "mode": mode,
         "detect_mode": detect_mode,
     })
@@ -447,7 +489,10 @@ def download(filename):
     path = os.path.join(RESULT_FOLDER, filename)
     if not os.path.exists(path):
         return "文件不存在", 404
-    return send_file(path, as_attachment=True, download_name=f"processed_{filename}")
+    desired_name = request.args.get("name")
+    ext_hint = filename.rsplit(".", 1)[1].lower() if "." in filename else None
+    download_name = _sanitize_download_name(desired_name, f"processed_{filename}", ext_hint=ext_hint)
+    return send_file(path, as_attachment=True, download_name=download_name)
 
 
 if __name__ == "__main__":
