@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+user_data/
+static/results/
+server.log
+*.zip
+*.png
+preview*.png
+dogfood-output/
+dist/
+build/

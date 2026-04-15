@@ -23,7 +23,10 @@ app = Flask(__name__,
             template_folder=get_resource_path("templates"))
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024 * 1024  # 10GB
 
-if getattr(sys, 'frozen', False):
+_user_data_dir_override = os.environ.get("PHOTO_PRIVACY_DATA_DIR")
+if _user_data_dir_override:
+    USER_DATA_DIR = os.path.abspath(os.path.expanduser(_user_data_dir_override))
+elif getattr(sys, 'frozen', False):
     USER_DATA_DIR = os.path.expanduser("~/Downloads/PhotoPrivacyData")
 else:
     USER_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_data")
@@ -496,4 +499,7 @@ def download(filename):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "5001"))
+    app.run(debug=debug, host=host, port=port)
