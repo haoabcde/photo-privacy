@@ -1,0 +1,18 @@
+[project]
+name = "photo-privacy"
+version = "0.1.0"
+description = "Self-hosted photo face privacy tool (blur or avatar) with realtime preview and batch ZIP processing."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "haoabcde" }]
+dependencies = [
+  "flask>=3.1.0",
+  "gunicorn>=22.0.0",
+  "numpy>=1.24.0",
+  "opencv-python-headless>=4.8.0",
+  "pillow>=10.0.0",
+]
+
+[dependency-groups]
+dev = []
