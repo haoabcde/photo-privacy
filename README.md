@@ -14,29 +14,35 @@
 ## 本地运行（开发）
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-python3 app.py
+uv sync
+uv run python app.py
 ```
 
 打开：
 
 - http://127.0.0.1:5001/
 
+如果你不使用 uv，也可以用 pip（兼容）：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 app.py
+```
+
 ## 服务器运行（生产）
 
 不要在公网用调试模式（`FLASK_DEBUG=1`），建议用 Gunicorn：
 
 ```bash
-pip install -r requirements.txt
+uv sync --frozen
 
 export HOST=0.0.0.0
 export PORT=5001
 export PHOTO_PRIVACY_DATA_DIR=/tmp/photo-privacy-data
 
-gunicorn -b 0.0.0.0:${PORT} wsgi:app --workers 1 --threads 4 --timeout 120
+uv run gunicorn -b 0.0.0.0:${PORT} wsgi:app --workers 1 --threads 4 --timeout 120
 ```
 
 ## Docker 部署
@@ -55,4 +61,3 @@ docker run --rm -p 5001:5001 -e PORT=5001 -e PHOTO_PRIVACY_DATA_DIR=/data photo-
 - `avatars/`
 
 如果不设置该变量，默认会写入项目目录下的 `./user_data/`（适合本地开发，不建议部署到只读文件系统）。
-
