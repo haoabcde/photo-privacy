@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Run unit tests
+        run: uv run python -m unittest -q tests_test_face_processor.py
+
+      - name: Verify exported requirements.txt is up-to-date
+        run: |
+          uv export --format requirements-txt --no-hashes -o requirements.txt
+          git diff --exit-code requirements.txt
+
