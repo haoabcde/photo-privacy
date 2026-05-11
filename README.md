@@ -1,4 +1,11 @@
-# 人脸隐私保护工具（Photo Privacy）
+# 🛡️ Photo Privacy (人脸隐私保护工具)
+
+> **人脸隐私保护终极工具：让你的照片在分享时既安全又得体。**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![uv](https://img.shields.io/badge/built%20with-uv-purple.svg)](https://github.com/astral-sh/uv)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![OpenCV](https://img.shields.io/badge/OpenCV-YuNet-green.svg)](https://opencv.org/)
 
 一个本地/自部署的人脸隐私保护网页工具：支持对图片中的人脸进行卡通头像替换或局部模糊处理，并提供实时预览与批处理 ZIP 下载。
 
