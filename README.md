@@ -25,19 +25,16 @@
 - **缩略图优化**：智能缩放预览图，大幅提升网页加载与响应速度。
 - **Modern 工具链**：基于 `uv` 构建，提供极速的依赖同步与开发体验。
 
-## 本地运行（开发）
+## 🚀 快速开始
 
+### 使用 uv (推荐)
+仅需一步即可启动：
 ```bash
-uv sync
 uv run python app.py
 ```
+访问：[http://127.0.0.1:5001](http://127.0.0.1:5001)
 
-打开：
-
-- http://127.0.0.1:5001/
-
-如果你不使用 uv，也可以用 pip（兼容）：
-
+### 使用传统方式 (pip)
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -45,33 +42,32 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-## 服务器运行（生产）
+## ⚙️ 配置参数
 
-不要在公网用调试模式（`FLASK_DEBUG=1`），建议用 Gunicorn：
+| 环境变量 | 说明 | 默认值 |
+| :--- | :--- | :--- |
+| `PHOTO_PRIVACY_DATA_DIR` | 上传与结果存储目录 | `./user_data/` |
+| `HOST` | 服务监听地址 | `0.0.0.0` |
+| `PORT` | 服务端口 | `5001` |
+| `FLASK_DEBUG` | 是否开启调试模式 | `0` |
 
-```bash
-uv sync --frozen
-
-export HOST=0.0.0.0
-export PORT=5001
-export PHOTO_PRIVACY_DATA_DIR=/tmp/photo-privacy-data
-
-uv run gunicorn -b 0.0.0.0:${PORT} wsgi:app --workers 1 --threads 4 --timeout 120
-```
-
-## Docker 部署
+## 🐳 Docker 部署
 
 ```bash
 docker build -t photo-privacy .
 docker run --rm -p 5001:5001 -e PORT=5001 -e PHOTO_PRIVACY_DATA_DIR=/data photo-privacy
 ```
 
-## 数据目录
+## 🏗️ 生产环境
 
-服务会在 `PHOTO_PRIVACY_DATA_DIR` 下写入上传文件与处理结果：
+建议使用 Gunicorn 配合多线程模式以获得更佳性能：
+```bash
+uv run gunicorn -b 0.0.0.0:5001 wsgi:app --workers 1 --threads 4 --timeout 120
+```
 
-- `uploads/`
-- `results/`
-- `avatars/`
+## 🗺️ 开发路线图
 
-如果不设置该变量，默认会写入项目目录下的 `./user_data/`（适合本地开发，不建议部署到只读文件系统）。
+- [ ] 视频人脸隐私脱敏支持
+- [ ] 更多卡通头像预设库
+- [ ] 基于 WebUI 的交互式人脸剔除
+- [ ] GPU 加速推理支持 (CUDA)
