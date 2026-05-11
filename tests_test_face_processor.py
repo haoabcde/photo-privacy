@@ -56,5 +56,19 @@ class FaceProcessorTests(unittest.TestCase):
             self.assertEqual(len(faces_strict), 0)
             mock_haar.assert_not_called()
 
+    def test_process_image_honors_single_detect_mode(self):
+        with patch.object(face_processor, 'correct_image_orientation', return_value=self.image), \
+             patch.object(face_processor, 'detect_faces', return_value=[]) as mock_detect:
+            face_processor.process_image(b'image-bytes', mode='blur', detect_mode='single')
+
+        self.assertEqual(mock_detect.call_args.kwargs['detect_mode'], 'single')
+
+    def test_process_preview_honors_single_detect_mode(self):
+        with patch.object(face_processor, 'correct_image_orientation', return_value=self.image), \
+             patch.object(face_processor, 'detect_faces', return_value=[]) as mock_detect:
+            face_processor.process_preview(b'image-bytes', mode='blur', detect_mode='single')
+
+        self.assertEqual(mock_detect.call_args.kwargs['detect_mode'], 'single')
+
 if __name__ == '__main__':
     unittest.main()
