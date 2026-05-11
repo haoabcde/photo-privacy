@@ -449,6 +449,10 @@ def apply_face_blur(image_bgr, faces, blur_strength=55):
     return result
 
 
+def _normalize_detect_mode(detect_mode):
+    return detect_mode if detect_mode in {"single", "multi"} else "multi"
+
+
 # ─── 主处理入口 ───────────────────────────────────────────────
 def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, avatar_path=None, global_blur_strength=0, 
                   is_smart_batch=False, rule_single="blur", rule_multi="blur_faces", avatar_bytes=None, jpeg_quality_override=None):
@@ -457,7 +461,8 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
         raise ValueError("无法读取图片")
 
     # 全量检测人脸，批处理时启用严格模式防止风景图误识别
-    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
+    initial_detect_mode = "multi" if is_smart_batch else _normalize_detect_mode(detect_mode)
+    faces = detect_faces(image_bgr, mode=mode, detect_mode=initial_detect_mode, strict=is_smart_batch)
     face_count = len(faces)
 
     output = image_bgr # 默认不复制，除非需要修改
@@ -511,7 +516,7 @@ def process_image(image_bytes, mode="blur", detect_mode=None, blur_strength=55, 
     return _encode_jpeg(output, quality=jpeg_quality), face_count
 
 
-def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, avatar_bytes=None, is_smart_batch=False,
+def process_preview(image_bytes, strength=40, mode="blur", detect_mode=None, avatar_path=None, avatar_bytes=None, is_smart_batch=False,
                     rule_single="blur", rule_multi="blur_faces", safety_level=None):
     image_bgr = correct_image_orientation(image_bytes)
     if image_bgr is None:
@@ -520,7 +525,8 @@ def process_preview(image_bytes, strength=40, mode="blur", avatar_path=None, ava
     image_bgr = _resize_for_preview(image_bgr, max_side=900)
     blur_strength, global_blur_strength = _map_strength(strength)
 
-    faces = detect_faces(image_bgr, mode="blur", detect_mode="multi", strict=is_smart_batch)
+    initial_detect_mode = "multi" if is_smart_batch else _normalize_detect_mode(detect_mode)
+    faces = detect_faces(image_bgr, mode=mode, detect_mode=initial_detect_mode, strict=is_smart_batch)
     face_count = len(faces)
     output = image_bgr
 

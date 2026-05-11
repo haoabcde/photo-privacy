@@ -5,12 +5,10 @@ import os
 import sys
 import uuid
 import json
-import cv2
-import numpy as np
 import zipfile
 import io
 from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, Response
-from face_processor import process_image, process_preview, detect_faces, _detect_yunet, _detect_haar
+from face_processor import process_image, process_preview
 
 def get_resource_path(relative_path):
     """获取资源绝对路径，兼容 PyInstaller 的 _MEIPASS"""
@@ -212,6 +210,7 @@ def preview():
 
     strength = request.form.get("strength", "40")
     mode = request.form.get("mode", "blur")
+    detect_mode = request.form.get("detect_mode")
     is_smart_batch = request.form.get("is_smart_batch") == "true"
     rule_single = request.form.get("rule_single", "blur")
     rule_multi = request.form.get("rule_multi", "blur_faces")
@@ -233,6 +232,7 @@ def preview():
             image_bytes,
             strength=strength,
             mode=mode,
+            detect_mode=detect_mode,
             avatar_path=avatar_path,
             avatar_bytes=avatar_bytes,
             is_smart_batch=is_smart_batch,

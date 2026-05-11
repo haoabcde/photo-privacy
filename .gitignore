@@ -66,6 +66,7 @@ static/avatars/
 static/results/
 server.log
 dogfood-output/
+多余文件/
 
 # Mac / OS specific
 .DS_Store

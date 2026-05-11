@@ -251,7 +251,7 @@
 <div class="container">
   <header>
     <h1>🛡️ 人脸隐私保护工具</h1>
-    <p>本地运行 · 数据不上传 · 基于 MediaPipe 人脸检测</p>
+    <p>本地运行 · 数据不上传 · 基于 YuNet/OpenCV 人脸检测</p>
   </header>
 
   <div class="card">
@@ -706,6 +706,7 @@ async function triggerPreview() {
   const formData = new FormData();
   formData.append('strength', document.getElementById('strength').value);
   formData.append('mode', currentMode);
+  if (currentTab === 'single') formData.append('detect_mode', currentDetectMode);
 
   if (currentTab === 'batch') {
     formData.append('is_smart_batch', 'true');
